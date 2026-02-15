@@ -1,7 +1,9 @@
 from typing import List, Any, Optional
 from ragtune.core.interfaces import BaseRetriever
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
+from ragtune.registry import registry
 
+@registry.retriever("llamaindex")
 class LlamaIndexRetriever(BaseRetriever):
     """
     Adapter for LlamaIndex retrievers to work within the RAGtune ecosystem.
@@ -14,13 +16,13 @@ class LlamaIndexRetriever(BaseRetriever):
         """
         self.li_retriever = li_retriever
 
-    def retrieve(self, query: str, top_k: int = 10) -> List[ScoredDocument]:
+    def retrieve(self, context: RAGtuneContext, top_k: int = 10) -> List[ScoredDocument]:
         """
         Retrieve documents from the underlying LlamaIndex retriever and 
         convert them to RAGtune ScoredDocuments.
         """
         # LlamaIndex retrieval returns List[NodeWithScore]
-        li_nodes = self.li_retriever.retrieve(query)
+        li_nodes = self.li_retriever.retrieve(context.query)
         
         results = []
         for i, node_with_score in enumerate(li_nodes[:top_k]):
@@ -46,15 +48,15 @@ class LlamaIndexRetriever(BaseRetriever):
             
         return results
 
-    async def aretrieve(self, query: str, top_k: int = 10) -> List[ScoredDocument]:
+    async def aretrieve(self, context: RAGtuneContext, top_k: int = 10) -> List[ScoredDocument]:
         """
         Async version of LlamaIndex retrieval.
         Using LlamaIndex's aretrieve if available.
         """
         if hasattr(self.li_retriever, "aretrieve"):
-            li_nodes = await self.li_retriever.aretrieve(query)
+            li_nodes = await self.li_retriever.aretrieve(context.query)
         else:
-            li_nodes = self.li_retriever.retrieve(query)
+            li_nodes = self.li_retriever.retrieve(context.query)
             
         results = []
         for i, node_with_score in enumerate(li_nodes[:top_k]):

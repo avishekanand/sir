@@ -1,7 +1,9 @@
 import pytest
 from unittest.mock import MagicMock
 from ragtune.adapters.llamaindex import LlamaIndexRetriever
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
+from ragtune.core.budget import CostTracker, CostBudget
+from ragtune.core.types import ControllerTrace
 
 class MockNode:
     def __init__(self, node_id, content, metadata=None):
@@ -26,7 +28,9 @@ def test_llamaindex_retriever_sync():
     mock_li.retrieve.return_value = nodes
     
     adapter = LlamaIndexRetriever(mock_li)
-    results = adapter.retrieve("test")
+    tracker = CostTracker(CostBudget(), ControllerTrace())
+    context = RAGtuneContext(query="test", tracker=tracker)
+    results = adapter.retrieve(context)
     
     assert len(results) == 2
     assert results[0].id == "n1"
@@ -47,7 +51,9 @@ async def test_llamaindex_retriever_async():
     mock_li.aretrieve = mock_aretrieve
     
     adapter = LlamaIndexRetriever(mock_li)
-    results = await adapter.aretrieve("test")
+    tracker = CostTracker(CostBudget(), ControllerTrace())
+    context = RAGtuneContext(query="test", tracker=tracker)
+    results = await adapter.aretrieve(context)
     
     assert len(results) == 1
     assert results[0].id == "n1"

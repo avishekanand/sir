@@ -15,19 +15,31 @@ Unlike traditional RAG pipelines that follow a static "waterfall" (Retrieve -> R
 
 This allows RAGtune to dynamically discover "hot spots" of relevant information (e.g., specific sections or sources) and prioritize them in real-time.
 
-## Component Architecture
+## Component Architecture (v0.5+)
 
 ### 1. Controller (`core/controller.py`)
-The orchestrator that manages the iterative loop. It handles initialization, calling the scheduler for the next batch, and final context assembly.
+The orchestrator that manages the iterative loop. It creates a `RAGtuneContext` containing the query and cost tracker, then passes this context to all downstream components for unified execution.
 
-### 2. Scheduler (`components/schedulers.py`)
-The "Driver". It uses the `UtilityEstimator` to propose the next document batch indices (`BatchProposal`) and decides which reranking strategy to apply.
+### 2. RAGtuneContext (`core/types.py`)
+**New in v0.5**: A unified execution context that encapsulates the `query`, `tracker`, and arbitrary `metadata`. All components now receive this single object instead of separate arguments, standardizing the API and enabling easier middleware injection.
 
-### 3. Utility Estimator (`components/estimators.py`)
-The "Brain". It adapts its predictions of unranked document utility based on the metadata and content of high-scoring documents found in previous rounds.
+### 3. Scheduler (`components/schedulers.py`)
+The "Driver". It uses the `UtilityEstimator` to propose the next document batch indices (`BatchProposal`) and decides which reranking strategy to apply. Receives `RAGtuneContext` to access budget state.
 
-### 4. CostTracker (`core/budget.py`)
-The "Bank". It tracks tokens, latency, and API calls. Every component must call `try_consume_*` to ensure execution stays within the user-defined `CostBudget`.
+### 4. Utility Estimator (`components/estimators.py`)
+The "Brain". It adapts its predictions of unranked document utility based on the metadata and content of high-scoring documents found in previous rounds. Uses `RAGtuneContext` for query-aware scoring.
+
+### 5. CostTracker (`core/budget.py`)
+The "Bank". **v0.5 Enhancement**: Now supports **arbitrary cost types** via a dictionary-based system. Track anything—tokens, USD, GPU_FLOPS, or custom metrics—by calling `try_consume(cost_type, amount)`. Legacy helpers (`try_consume_tokens`, etc.) remain for backward compatibility.
+
+### 6. Component Registry (`registry.py`)
+**New in v0.5**: A global registry system with decorators (`@reranker`, `@retriever`, etc.) for easy component registration. Enables loading entire pipelines from configuration files and simplifies custom component integration.
+
+### 7. CLI & Configuration (`ragtune/cli`)
+**New in v0.5**: The `ragtune` command-line tool allows users to:
+- **Init**: Scaffold configuration files (`ragtune init`).
+- **List**: Discover available components (`ragtune list`).
+- **Run**: Execute pipelines defined in YAML without writing boilerplate code (`ragtune run pipeline.yaml`).
 
 ## Flow Diagram (Mermaid)
 

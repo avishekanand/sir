@@ -1,7 +1,9 @@
 import pytest
 from unittest.mock import MagicMock
 from ragtune.adapters.langchain import LangChainRetriever
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
+from ragtune.core.budget import CostTracker, CostBudget
+from ragtune.core.types import ControllerTrace
 
 def test_langchain_retriever_conversion():
     # 1. Setup Mock LangChain Documents
@@ -16,8 +18,10 @@ def test_langchain_retriever_conversion():
     mock_lc_retriever.invoke.return_value = [mock_doc]
     
     # 3. Use Adapter
+    tracker = CostTracker(CostBudget(), ControllerTrace())
+    context = RAGtuneContext(query="test query", tracker=tracker)
     adapter = LangChainRetriever(mock_lc_retriever)
-    results = adapter.retrieve("test query", top_k=1)
+    results = adapter.retrieve(context, top_k=1)
     
     # 4. Assertions
     assert len(results) == 1
@@ -39,7 +43,9 @@ def test_langchain_retriever_id_fallback():
     mock_lc_retriever.get_relevant_documents.return_value = [mock_doc]
     
     adapter = LangChainRetriever(mock_lc_retriever)
-    results = adapter.retrieve("query")
+    tracker = CostTracker(CostBudget(), ControllerTrace())
+    context = RAGtuneContext(query="query", tracker=tracker)
+    results = adapter.retrieve(context)
     
     assert len(results) == 1
     assert results[0].id == "0" # Fallback to index

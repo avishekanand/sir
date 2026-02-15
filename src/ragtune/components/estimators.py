@@ -1,6 +1,6 @@
 from typing import List, Optional
 import numpy as np
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
 
 class UtilityEstimator:
     """
@@ -9,7 +9,8 @@ class UtilityEstimator:
     def estimate(
         self, 
         pool: List[ScoredDocument], 
-        ranked_indices: List[int]
+        ranked_indices: List[int],
+        context: RAGtuneContext
     ) -> List[float]:
         estimates = [d.score for d in pool]
         if not ranked_indices:
@@ -48,7 +49,8 @@ class SimilarityEstimator:
     def estimate(
         self, 
         pool: List[ScoredDocument], 
-        ranked_indices: List[int]
+        ranked_indices: List[int],
+        context: RAGtuneContext
     ) -> List[float]:
         self._ensure_embeddings(pool)
         estimates = np.array([d.score for d in pool], dtype=float)

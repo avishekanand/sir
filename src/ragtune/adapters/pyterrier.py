@@ -1,8 +1,9 @@
 import pandas as pd
 from typing import List, Any, Optional
 from ragtune.core.interfaces import BaseRetriever
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
 from ragtune.core.controller import RAGtuneController
+from ragtune.registry import registry
 
 try:
     import pyterrier as pt
@@ -10,6 +11,7 @@ except ImportError:
     # PyTerrier might not be installed in all environments
     pt = None
 
+@registry.retriever("pyterrier")
 class PyTerrierRetriever(BaseRetriever):
     """
     Adapter for PyTerrier transformers (indices) to work as RAGtune retrievers.
@@ -21,12 +23,12 @@ class PyTerrierRetriever(BaseRetriever):
         """
         self.pt_transformer = pt_transformer
 
-    def retrieve(self, query: str, top_k: int = 10) -> List[ScoredDocument]:
+    def retrieve(self, context: RAGtuneContext, top_k: int = 10) -> List[ScoredDocument]:
         """
         Retrieve documents using PyTerrier and convert to RAGtune format.
         """
         # Create a single-row DataFrame for the query
-        queries_df = pd.DataFrame([{"qid": "q1", "query": query}])
+        queries_df = pd.DataFrame([{"qid": "q1", "query": context.query}])
         
         # Run retrieval
         res = self.pt_transformer.transform(queries_df)

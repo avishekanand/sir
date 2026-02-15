@@ -1,9 +1,10 @@
 from typing import List, Optional, Union
 from ragtune.core.interfaces import BaseScheduler
-from ragtune.core.types import ScoredDocument, BatchProposal, RerankStrategy
-from ragtune.core.budget import CostTracker
+from ragtune.core.types import ScoredDocument, BatchProposal, RerankStrategy, RAGtuneContext
 from ragtune.components.estimators import UtilityEstimator, SimilarityEstimator
+from ragtune.registry import registry
 
+@registry.scheduler("active-learning")
 class ActiveLearningScheduler(BaseScheduler):
     def __init__(
         self, 
@@ -19,14 +20,14 @@ class ActiveLearningScheduler(BaseScheduler):
         self, 
         pool: List[ScoredDocument], 
         processed_indices: List[int], 
-        tracker: CostTracker
+        context: RAGtuneContext
     ) -> Optional[BatchProposal]:
         if len(processed_indices) >= len(pool):
             return None
 
         # 1. Get Utility Estimates
         # If using SimilarityEstimator, this will involve semantic boosting
-        utilities = self.estimator.estimate(pool, processed_indices)
+        utilities = self.estimator.estimate(pool, processed_indices, context)
         
         # 2. Filter & Sort Candidates
         candidates = []

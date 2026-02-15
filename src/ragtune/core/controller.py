@@ -1,5 +1,5 @@
 from typing import List, Optional
-from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, ReformulationResult, BatchProposal
+from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext
 from ragtune.core.budget import CostBudget, CostTracker
 from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler
 
@@ -24,16 +24,19 @@ class RAGtuneController:
         budget = override_budget or self.default_budget
         trace = ControllerTrace()
         tracker = CostTracker(budget, trace)
+        context = RAGtuneContext(query=query, tracker=tracker)
         
         # 1. Reformulation
-        queries = self.reformulator.generate(query, tracker)
+        queries = self.reformulator.generate(context)
         if not queries:
             queries = [query]
         
         # 2. Retrieval
         reformulation_results = []
         for q in queries:
-            docs = self.retriever.retrieve(q, top_k=10)
+            # Create a temporary context for this sub-query if needed?
+            # For now, let's keep it simple.
+            docs = self.retriever.retrieve(context, top_k=10)
             reformulation_results.append(
                 ReformulationResult(original_query=query, reformulated_query=q, candidates=docs)
             )
@@ -51,7 +54,7 @@ class RAGtuneController:
         processed_indices = []
         while True:
             proposal = self.scheduler.propose_next_batch(
-                pool, processed_indices, tracker
+                pool, processed_indices, context
             )
             
             if proposal is None:
@@ -60,7 +63,7 @@ class RAGtuneController:
             batch_docs = [pool[i] for i in proposal.document_indices]
             
             if tracker.try_consume_rerank(len(batch_docs)):
-                reranked_batch = self.reranker.rerank(batch_docs, query)
+                reranked_batch = self.reranker.rerank(batch_docs, context)
                 
                 for idx, new_doc in zip(proposal.document_indices, reranked_batch):
                     pool[idx] = new_doc
@@ -80,7 +83,7 @@ class RAGtuneController:
         processed_docs = pool
             
         # 5. Assembly
-        final_docs = self.assembler.assemble(processed_docs, tracker)
+        final_docs = self.assembler.assemble(processed_docs, context)
         
         return ControllerOutput(
             query=query,
@@ -93,16 +96,17 @@ class RAGtuneController:
         budget = override_budget or self.default_budget
         trace = ControllerTrace()
         tracker = CostTracker(budget, trace)
+        context = RAGtuneContext(query=query, tracker=tracker)
         
         # 1. Reformulation
-        queries = await self.reformulator.agenerate(query, tracker)
+        queries = await self.reformulator.agenerate(context)
         if not queries:
             queries = [query]
         
         # 2. Retrieval
         reformulation_results = []
         for q in queries:
-            docs = await self.retriever.aretrieve(q, top_k=10)
+            docs = await self.retriever.aretrieve(context, top_k=10)
             reformulation_results.append(
                 ReformulationResult(original_query=query, reformulated_query=q, candidates=docs)
             )
@@ -120,7 +124,7 @@ class RAGtuneController:
         processed_indices = []
         while True:
             proposal = await self.scheduler.apropose_next_batch(
-                pool, processed_indices, tracker
+                pool, processed_indices, context
             )
             
             if proposal is None:
@@ -129,7 +133,7 @@ class RAGtuneController:
             batch_docs = [pool[i] for i in proposal.document_indices]
             
             if tracker.try_consume_rerank(len(batch_docs)):
-                reranked_batch = await self.reranker.arerank(batch_docs, query)
+                reranked_batch = await self.reranker.arerank(batch_docs, context)
                 
                 for idx, new_doc in zip(proposal.document_indices, reranked_batch):
                     pool[idx] = new_doc
@@ -149,7 +153,7 @@ class RAGtuneController:
         processed_docs = pool
             
         # 5. Assembly
-        final_docs = await self.assembler.aassemble(processed_docs, tracker)
+        final_docs = await self.assembler.aassemble(processed_docs, context)
         
         return ControllerOutput(
             query=query,

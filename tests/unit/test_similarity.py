@@ -7,7 +7,9 @@ import numpy as np
 mock_st = MagicMock()
 sys.modules["sentence_transformers"] = mock_st
 
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
+from ragtune.core.budget import CostTracker, CostBudget
+from ragtune.core.types import ControllerTrace
 from ragtune.components.estimators import SimilarityEstimator
 
 def test_similarity_estimator_boosting():
@@ -34,7 +36,9 @@ def test_similarity_estimator_boosting():
     estimator = SimilarityEstimator()
     
     # 3. Estimate with doc_1 as winner
-    estimates = estimator.estimate(pool, [0])
+    tracker = CostTracker(CostBudget(), ControllerTrace())
+    context = RAGtuneContext(query="test", tracker=tracker)
+    estimates = estimator.estimate(pool, [0], context)
     
     # 4. Assertions
     assert estimates[1] > pool[1].score # doc_2 boosted
@@ -63,9 +67,10 @@ def test_hybrid_scheduler_escalation():
         ScoredDocument(id="3", content="Z", score=0.2)
     ]
     tracker = CostTracker(CostBudget(), ControllerTrace())
+    context = RAGtuneContext(query="test", tracker=tracker)
     
     # Should escalate to LLM due to low gap (ambiguity)
-    proposal = scheduler.propose_next_batch(pool, [], tracker)
+    proposal = scheduler.propose_next_batch(pool, [], context)
     assert proposal.strategy == RerankStrategy.LLM
     print(f"Escalated strategy: {proposal.strategy}")
 

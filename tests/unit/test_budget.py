@@ -4,7 +4,7 @@ from ragtune.core.types import ControllerTrace
 
 def test_budget_token_consumption():
     trace = ControllerTrace()
-    budget = CostBudget(max_tokens=25)
+    budget = CostBudget.simple(tokens=25)
     tracker = CostTracker(budget, trace)
     
     assert tracker.try_consume_tokens(10) is True
@@ -13,7 +13,7 @@ def test_budget_token_consumption():
 
 def test_budget_rerank_consumption():
     trace = ControllerTrace()
-    budget = CostBudget(max_reranker_docs=5)
+    budget = CostBudget.simple(docs=5)
     tracker = CostTracker(budget, trace)
     
     assert tracker.try_consume_rerank(3) is True
@@ -21,8 +21,17 @@ def test_budget_rerank_consumption():
 
 def test_budget_reformulation_consumption():
     trace = ControllerTrace()
-    budget = CostBudget(max_reformulations=1)
+    budget = CostBudget.simple(reformulations=1)
     tracker = CostTracker(budget, trace)
     
     assert tracker.try_consume_reformulation() is True
     assert tracker.try_consume_reformulation() is False
+
+def test_custom_cost_type():
+    trace = ControllerTrace()
+    budget = CostBudget(limits={"usd": 0.50})
+    tracker = CostTracker(budget, trace)
+
+    assert tracker.try_consume("usd", 0.20) is True
+    assert tracker.try_consume("usd", 0.40) is False
+    assert tracker.consumed["usd"] == 0.20

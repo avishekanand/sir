@@ -4,7 +4,17 @@ Detailed history of RAGtune versions and major milestones.
 
 ---
 
-## v0.4 - Advanced Integrations & Benchmarking (Current)
+## v0.5 - The Developer Experience Update 🛠️
+*Focus: CLI, Configuration, and Extensibility.*
+
+- **RAGtune CLI**: A new command-line interface (`ragtune`) to init, list, and run pipelines.
+- **Component Registry**: `@reranker`, `@retriever` decorators for auto-discovery and YAML configuration.
+- **Generic Cost Interface**: `CostTracker` now supports arbitrary cost types (e.g., "GPU_FLOPS"), decoupled from hardcoded token counts.
+- **Unified Context**: Refactored all components to accept a unified `RAGtuneContext` object.
+
+---
+
+## v0.4 - Advanced Integrations & Benchmarking (Legacy)
 *Focus: Scaling, IR Ecosystem Parity, and Rigorous Evaluation.*
 
 - **PyTerrier Adapter**: Full integration with the PyTerrier ecosystem.

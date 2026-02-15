@@ -1,7 +1,9 @@
 from typing import List, Any
 from ragtune.core.interfaces import BaseRetriever
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
+from ragtune.registry import registry
 
+@registry.retriever("langchain")
 class LangChainRetriever(BaseRetriever):
     """
     Adapter for LangChain retrievers to work within the RAGtune ecosystem.
@@ -14,16 +16,16 @@ class LangChainRetriever(BaseRetriever):
         """
         self.lc_retriever = lc_retriever
 
-    def retrieve(self, query: str, top_k: int = 10) -> List[ScoredDocument]:
+    def retrieve(self, context: RAGtuneContext, top_k: int = 10) -> List[ScoredDocument]:
         """
         Retrieve documents from the underlying LangChain retriever and 
         convert them to RAGtune ScoredDocuments.
         """
         # LangChain's newer invoke() method or older get_relevant_documents()
         if hasattr(self.lc_retriever, "invoke"):
-            lc_docs = self.lc_retriever.invoke(query)
+            lc_docs = self.lc_retriever.invoke(context.query)
         else:
-            lc_docs = self.lc_retriever.get_relevant_documents(query)
+            lc_docs = self.lc_retriever.get_relevant_documents(context.query)
             
         results = []
         for i, doc in enumerate(lc_docs[:top_k]):

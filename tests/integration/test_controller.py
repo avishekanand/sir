@@ -77,7 +77,7 @@ def test_feedback_propagation(fake_reformulator, fake_assembler):
     
     # Mock Reranker that returns 0.9 for "winner"
     class MockWinningReranker(BaseReranker):
-        def rerank(self, docs, query):
+        def rerank(self, docs, context):
             results = []
             for d in docs:
                 score = 0.9 if "winner" in d.content else 0.3

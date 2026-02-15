@@ -1,23 +1,26 @@
 from typing import List, Optional
 from ragtune.core.interfaces import BaseReranker
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
+from ragtune.registry import registry
 
+@registry.reranker("noop")
 class NoOpReranker(BaseReranker):
     """Identity reranker that returns documents as is."""
-    def rerank(self, documents: List[ScoredDocument], query: str) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
         return documents
 
+@registry.reranker("cross-encoder")
 class CrossEncoderReranker(BaseReranker):
     """Local reranking using SentenceTransformers CrossEncoder models."""
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
         from sentence_transformers import CrossEncoder
         self.model = CrossEncoder(model_name)
 
-    def rerank(self, documents: List[ScoredDocument], query: str) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
         if not documents:
             return []
         
-        pairs = [[query, doc.content] for doc in documents]
+        pairs = [[context.query, doc.content] for doc in documents]
         scores = self.model.predict(pairs)
         
         results = []
@@ -28,13 +31,14 @@ class CrossEncoderReranker(BaseReranker):
             }))
         return results
 
+@registry.reranker("llm")
 class LLMReranker(BaseReranker):
     """API-based reranking using LiteLLM for broad model support."""
     def __init__(self, model_name: str = "gpt-4o-mini"):
         import litellm
         self.model_name = model_name
 
-    def rerank(self, documents: List[ScoredDocument], query: str) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
         if not documents:
             return []
             
@@ -42,7 +46,7 @@ class LLMReranker(BaseReranker):
         import json
         
         # Construct a scoring prompt
-        prompt = f"Query: {query}\n\nRate the following documents from 0.0 to 1.0 based on relevance. Output a JSON list of scores only.\n"
+        prompt = f"Query: {context.query}\n\nRate the following documents from 0.0 to 1.0 based on relevance. Output a JSON list of scores only.\n"
         for i, doc in enumerate(documents):
             prompt += f"[{i}] {doc.content}\n"
             
@@ -67,12 +71,13 @@ class LLMReranker(BaseReranker):
             }))
         return results
 
+@registry.reranker("simulated")
 class SimulatedReranker(BaseReranker):
     """Placeholder for testing."""
-    def rerank(self, documents: List[ScoredDocument], query: str) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
         results = []
         for doc in documents:
-            is_match = query.lower() in doc.content.lower()
+            is_match = context.query.lower() in doc.content.lower()
             reranker_score = 0.95 if is_match else 0.3
             results.append(doc.model_copy(update={
                 "score": reranker_score,
@@ -80,13 +85,14 @@ class SimulatedReranker(BaseReranker):
             }))
         return results
 
+@registry.reranker("ollama-listwise")
 class OllamaListwiseReranker(BaseReranker):
     """Listwise reranking using Ollama for local LLM inference."""
     def __init__(self, model_name: str = "deepseek-r1:8b", base_url: str = "http://localhost:11434"):
         self.model_name = f"ollama/{model_name}"
         self.api_base = base_url
 
-    def rerank(self, documents: List[ScoredDocument], query: str) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
         if not documents:
             return []
             
@@ -95,7 +101,7 @@ class OllamaListwiseReranker(BaseReranker):
         
         # Construct a listwise ranking prompt
         prompt = (
-            f"Question: {query}\n\n"
+            f"Question: {context.query}\n\n"
             "Rank the following documents based on their relevance to the question. "
             "Assign a score between 0.0 (not relevant) and 1.0 (highly relevant) to each document. "
             "Output the results as a JSON list where each item has 'id' and 'relevance_score'.\n\n"

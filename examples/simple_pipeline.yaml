@@ -1,0 +1,34 @@
+pipeline:
+  name: "CLI Test Pipeline"
+  
+  components:
+    retriever:
+      type: "in-memory"
+      params:
+        documents:
+          - id: "doc1"
+            content: "RAGtune is a great library for RAG optimization."
+            score: 1.0
+          - id: "doc2"
+            content: "The CLI allows running pipelines from YAML."
+            score: 0.8
+          - id: "doc3"
+            content: "Active learning improves retrieval quality."
+            score: 0.5
+            
+    reranker:
+      type: "noop" # Use noop to avoid dependencies like sentence-transformers or litellm needing keys
+      
+    reformulator:
+      type: "identity"
+      
+    assembler:
+      type: "greedy"
+      
+    scheduler:
+      type: "active-learning"
+      
+  budget:
+    tokens: 1000
+    rerank_docs: 5
+    latency_ms: 1000

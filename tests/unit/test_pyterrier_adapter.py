@@ -2,7 +2,8 @@ import pytest
 import pandas as pd
 from unittest.mock import MagicMock
 from ragtune.adapters.pyterrier import PyTerrierRetriever, RAGtuneTransformer
-from ragtune.core.types import ScoredDocument, ControllerOutput, ControllerTrace
+from ragtune.core.types import ScoredDocument, ControllerOutput, ControllerTrace, RAGtuneContext
+from ragtune.core.budget import CostTracker, CostBudget
 
 def test_pyterrier_retriever_conversion():
     # Mock PT transformer
@@ -15,7 +16,9 @@ def test_pyterrier_retriever_conversion():
     mock_pt.transform.return_value = results_df
     
     adapter = PyTerrierRetriever(mock_pt)
-    results = adapter.retrieve("test query")
+    tracker = CostTracker(CostBudget(), ControllerTrace())
+    context = RAGtuneContext(query="test query", tracker=tracker)
+    results = adapter.retrieve(context)
     
     assert len(results) == 2
     assert results[0].id == "d1"

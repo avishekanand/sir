@@ -1,58 +1,53 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from ragtune.core.types import ScoredDocument, ReformulationResult, BatchProposal
-from ragtune.core.budget import CostTracker
+from ragtune.core.types import ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext
 
 class BaseRetriever(ABC):
     @abstractmethod
-    def retrieve(self, query: str, top_k: int) -> List[ScoredDocument]:
+    def retrieve(self, context: RAGtuneContext, top_k: int) -> List[ScoredDocument]:
         pass
 
-    async def aretrieve(self, query: str, top_k: int) -> List[ScoredDocument]:
-        return self.retrieve(query, top_k)
+    async def aretrieve(self, context: RAGtuneContext, top_k: int) -> List[ScoredDocument]:
+        return self.retrieve(context, top_k)
 
 class BaseReranker(ABC):
     @abstractmethod
-    def rerank(self, documents: List[ScoredDocument], query: str) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
         pass
 
-    async def arerank(self, documents: List[ScoredDocument], query: str) -> List[ScoredDocument]:
-        return self.rerank(documents, query)
+    async def arerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+        return self.rerank(documents, context)
 
 class BaseReformulator(ABC):
     @abstractmethod
-    def generate(self, query: str, tracker: CostTracker) -> List[str]:
+    def generate(self, context: RAGtuneContext) -> List[str]:
         pass
 
-    async def agenerate(self, query: str, tracker: CostTracker) -> List[str]:
-        return self.generate(query, tracker)
+    async def agenerate(self, context: RAGtuneContext) -> List[str]:
+        return self.generate(context)
 
 class BaseAssembler(ABC):
     @abstractmethod
-    def assemble(self, candidates: List[ScoredDocument], tracker: CostTracker) -> List[ScoredDocument]:
+    def assemble(self, candidates: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
         pass
 
-    async def aassemble(self, candidates: List[ScoredDocument], tracker: CostTracker) -> List[ScoredDocument]:
-        return self.assemble(candidates, tracker)
+    async def aassemble(self, candidates: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+        return self.assemble(candidates, context)
 
 class BaseScheduler(ABC):
     @abstractmethod
     def propose_next_batch(
         self,
-        pool: List[ScoredDocument],           # All candidates (ranked & unranked)
-        processed_indices: List[int],         # Which ones we've already done
-        tracker: CostTracker                  # Current budget status
-    ) -> Optional[BatchProposal]:             # Return None to stop iteration
-        """
-        Look at the pool. Look at what we've already reranked.
-        Decide which indices to rerank next.
-        """
+        pool: List[ScoredDocument],
+        processed_indices: List[int],
+        context: RAGtuneContext
+    ) -> Optional[BatchProposal]:
         pass
 
     async def apropose_next_batch(
         self,
         pool: List[ScoredDocument],
         processed_indices: List[int],
-        tracker: CostTracker
+        context: RAGtuneContext
     ) -> Optional[BatchProposal]:
-        return self.propose_next_batch(pool, processed_indices, tracker)
+        return self.propose_next_batch(pool, processed_indices, context)

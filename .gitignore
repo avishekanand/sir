@@ -6,3 +6,5 @@ __pycache__/
 data/bright_sample/
 # Ignore benchmarks output if any
 *.log
+ragtune_config.yaml
+.DS_Store

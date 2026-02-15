@@ -5,13 +5,13 @@ import os
 # Add src to sys.path for testing
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-from ragtune.core.types import ScoredDocument, RerankStrategy
+from ragtune.core.types import ScoredDocument, RerankStrategy, RAGtuneContext
 from ragtune.core.budget import CostBudget
 from ragtune.components.retrievers import InMemoryRetriever
 from ragtune.core.interfaces import BaseReranker, BaseReformulator, BaseAssembler, BaseScheduler
 
 class FakeReranker(BaseReranker):
-    def rerank(self, documents: list[ScoredDocument], query: str) -> list[ScoredDocument]:
+    def rerank(self, documents: list[ScoredDocument], context: RAGtuneContext) -> list[ScoredDocument]:
         # Simple simulated reranking: add a small score boost
         results = []
         for doc in documents:
@@ -23,18 +23,18 @@ class FakeReranker(BaseReranker):
         return results
 
 class FakeReformulator(BaseReformulator):
-    def generate(self, query, tracker):
-        if tracker.try_consume_reformulation():
-            return [query]
+    def generate(self, context: RAGtuneContext):
+        if context.tracker.try_consume_reformulation():
+            return [context.query]
         return []
 
 class FakeAssembler(BaseAssembler):
-    def assemble(self, candidates, tracker):
+    def assemble(self, candidates, context: RAGtuneContext):
         # Sort by score and take first N that fit budget
         sorted_candidates = sorted(candidates, key=lambda x: x.score, reverse=True)
         result = []
         for doc in sorted_candidates:
-            if tracker.try_consume_tokens(doc.token_count):
+            if context.tracker.try_consume_tokens(doc.token_count):
                 result.append(doc)
         return result
 
@@ -43,7 +43,7 @@ class FakeScheduler(BaseScheduler):
     def __init__(self, batch_size=1):
         self.batch_size = batch_size
 
-    def propose_next_batch(self, pool, processed_indices, tracker):
+    def propose_next_batch(self, pool, processed_indices, context: RAGtuneContext):
         if len(processed_indices) >= len(pool):
             return None
         

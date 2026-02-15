@@ -1,4 +1,4 @@
-# RAGtune (Version 0.4 - Advanced Integrations)
+# RAGtune (Version 0.5 - Developer Experience)
 
 [**Release Log**](docs/RELEASE_LOG.md) | [**Roadmap**](docs/roadmap.md)
 
@@ -31,7 +31,21 @@ Unlike traditional linear RAG pipelines, RAGtune uses an **Active Learning** fee
 
 ## Quick Start
 
-### 1. Unified Benchmarking Suite
+### 1. RAGtune CLI (New in v0.5)
+Initialize, configure, and run pipelines directly from the terminal.
+
+```bash
+# Initialize a new config file
+ragtune init
+
+# List available components
+ragtune list
+
+# Run a pipeline
+ragtune run ragtune_config.yaml --query "What is active learning?"
+```
+
+### 2. Unified Benchmarking Suite
 ```bash
 make run-benchmarks
 ```

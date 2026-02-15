@@ -55,3 +55,11 @@ class ControllerOutput(BaseModel):
     documents: List[ScoredDocument]
     trace: ControllerTrace
     final_budget_state: Dict[str, Any]
+
+class RAGtuneContext(BaseModel):
+    """Execution context passed to all components."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    query: str
+    tracker: Any  # CostTracker
+    metadata: Dict[str, Any] = Field(default_factory=dict)

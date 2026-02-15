@@ -1,60 +1,97 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 import time
 from ragtune.core.types import ControllerTrace
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 class CostBudget(BaseModel):
-    max_tokens: int = 4000
-    max_reranker_docs: int = 50
-    max_reformulations: int = 1
-    max_latency_ms: float = 2000.0
+    """
+    Budget limits for various operations.
+    Default keys: 'tokens', 'rerank_docs', 'reformulations', 'latency_ms'
+    """
+    limits: Dict[str, float] = Field(default_factory=lambda: {
+        "tokens": 4000,
+        "rerank_docs": 50,
+        "reformulations": 1,
+        "latency_ms": 2000.0
+    })
+
+    @model_validator(mode='before')
+    @classmethod
+    def map_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # If 'limits' is not provided but 'max_*' fields are, populate 'limits'
+            if "limits" not in data:
+                # Start with default limits or empty? 
+                # To maintain v0.4 behavior, we should probably start with empty and only set what's provided
+                # but if we want to fallback to defaults, we need to be careful.
+                # Actually, if the user explicitly provides ANY limit, we should probably use that.
+                new_limits = {}
+                if "max_tokens" in data: new_limits["tokens"] = data.pop("max_tokens")
+                if "max_reranker_docs" in data: new_limits["rerank_docs"] = data.pop("max_reranker_docs")
+                if "max_reformulations" in data: new_limits["reformulations"] = data.pop("max_reformulations")
+                if "max_latency_ms" in data: new_limits["latency_ms"] = data.pop("max_latency_ms")
+                
+                if new_limits:
+                    data["limits"] = new_limits
+        return data
+
+    @classmethod
+    def simple(cls, tokens=4000, docs=50, reformulations=1, latency=2000.0):
+        return cls(limits={
+            "tokens": tokens,
+            "rerank_docs": docs,
+            "reformulations": reformulations,
+            "latency_ms": latency
+        })
 
 class CostTracker:
     def __init__(self, budget: CostBudget, trace: ControllerTrace):
         self.budget = budget
         self.trace = trace
-        self._tokens_used = 0
-        self._rerank_docs_used = 0
-        self._reformulations_used = 0
+        self.consumed: Dict[str, float] = {}
         self._start_time = time.time()
 
     @property
     def elapsed_ms(self) -> float:
         return (time.time() - self._start_time) * 1000
 
-    def try_consume_reformulation(self, n=1) -> bool:
-        if self._reformulations_used + n <= self.budget.max_reformulations:
-            self._reformulations_used += n
-            self.trace.add("budget", "consume_reformulation", count=n)
+    def try_consume(self, cost_type: str, amount: float = 1.0) -> bool:
+        """Generic consumption method for any cost type."""
+        # 1. Check Latency (Global constraint)
+        if cost_type != "latency_ms" and "latency_ms" in self.budget.limits:
+            if self.elapsed_ms > self.budget.limits["latency_ms"]:
+                self.trace.add("budget", f"deny_{cost_type}", reason="latency_exceeded", elapsed=self.elapsed_ms)
+                return False
+
+        # 2. Check Capacity
+        limit = self.budget.limits.get(cost_type)
+        if limit is None:
+            # If no limit is defined, we allow it but don't track it as a hard limit?
+            # Or should we deny it? Let's allow it but warn in trace.
+            current = self.consumed.get(cost_type, 0.0)
+            self.consumed[cost_type] = current + amount
             return True
-        self.trace.add("budget", "deny_reformulation", reason="limit_reached")
+
+        current = self.consumed.get(cost_type, 0.0)
+        if current + amount <= limit:
+            self.consumed[cost_type] = current + amount
+            self.trace.add("budget", f"consume_{cost_type}", count=amount, total=self.consumed[cost_type])
+            return True
+        
+        self.trace.add("budget", f"deny_{cost_type}", reason="limit_reached", requested=amount, current=current, limit=limit)
         return False
+
+    # Legacy-style helpers for convenience
+    def try_consume_reformulation(self, n=1) -> bool:
+        return self.try_consume("reformulations", n)
 
     def try_consume_rerank(self, n_docs: int) -> bool:
-        # Check Latency
-        if self.elapsed_ms > self.budget.max_latency_ms:
-            self.trace.add("budget", "deny_rerank", reason="latency_exceeded", elapsed=self.elapsed_ms)
-            return False
-        
-        # Check Capacity
-        remaining = self.budget.max_reranker_docs - self._rerank_docs_used
-        if n_docs > remaining:
-            self.trace.add("budget", "deny_rerank", reason="doc_limit_exceeded", requested=n_docs, remaining=remaining)
-            return False
-            
-        self._rerank_docs_used += n_docs
-        self.trace.add("budget", "consume_rerank", count=n_docs)
-        return True
+        return self.try_consume("rerank_docs", n_docs)
 
     def try_consume_tokens(self, n_tokens: int) -> bool:
-        if self._tokens_used + n_tokens <= self.budget.max_tokens:
-            self._tokens_used += n_tokens
-            return True
-        return False
+        return self.try_consume("tokens", n_tokens)
 
     def snapshot(self) -> dict:
-        return {
-            "tokens": self._tokens_used,
-            "latency": self.elapsed_ms,
-            "rerank_docs": self._rerank_docs_used
-        }
+        data = self.consumed.copy()
+        data["latency"] = self.elapsed_ms
+        return data
