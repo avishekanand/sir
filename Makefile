@@ -16,6 +16,10 @@ run-scaled-terrier:
 	@echo "--- Running Scaled PyTerrier Demo (ir_datasets) ---"
 	@$(PYTHON_CLEAN) examples/demo_pyterrier_ird.py
 
+run-benchmarks:
+	@echo "--- Running RAGtune Unified Benchmark Suite ---"
+	@$(PYTHON_CLEAN) scripts/benchmark_suite.py
+
 run-langchain:
 	@echo "--- Running LangChain Demo ---"
 	@$(PYTHON_CLEAN) examples/demo_langchain_retriever.py

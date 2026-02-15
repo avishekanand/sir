@@ -1,4 +1,6 @@
-# RAGtune (Version 0.3 - Production Readiness)
+# RAGtune (Version 0.4 - Advanced Integrations)
+
+[**Release Log**](docs/RELEASE_LOG.md) | [**Roadmap**](docs/roadmap.md)
 
 RAGtune is a budget-aware, iterative RAG middleware that treats **cost** and **latency** as first-class constraints.
 
@@ -20,33 +22,33 @@ Unlike traditional linear RAG pipelines, RAGtune uses an **Active Learning** fee
 - `src/ragtune/utils/`: Shared utilities like the professional **CLI Console**.
 - `tests/`: Unit and integration tests, plus performance benchmarks.
 
-## New in v0.2: Intelligence & Real Data
+## New in v0.4: Scaled Integrations & Benchmarking
 
-- **Similarity Feedback**: Unranked documents are dynamically boosted based on semantic similarity to verified "winners".
-- **LangChain Adapter**: Seamlessly connect to FAISS, Chroma, or any LangChain-compatible retriever.
-- **Reasoning Benchmark**: Integrated **BRIGHT** dataset sample for testing complex reasoning queries.
-- **Professional CLI**: Beautiful, color-coded tables and traces using `rich`.
+- **PyTerrier Adapter**: Full support for industrial IR pipelines.
+- **Ollama Listwise Reranker**: Reasoning-aware ranking via local DeepSeek models.
+- **Unified Benchmark Suite**: Professional IR metrics (nDCG@5, MRR) for benchmarking RAG efficiency.
+- **Scaled Collection**: Support for indexing 170k+ doc collections (TREC-COVID).
 
 ## Quick Start
 
-### 1. Simple Quickstart
+### 1. Unified Benchmarking Suite
+```bash
+make run-benchmarks
+```
+
+### 2. Scaled PyTerrier Demo (ir_datasets)
+```bash
+make run-scaled-terrier
+```
+
+### 3. Basic Async Quickstart
 ```bash
 python3 examples/quickstart.py
 ```
 
-### 2. Real Data Demo (Job Postings)
+### 4. Reasoning Demo (BRIGHT Dataset)
 ```bash
-python3 examples/demo_job_postings.py
-```
-
-### 3. Reasoning Demo (BRIGHT Dataset)
-```bash
-python3 examples/demo_bright_retrieval.py
-```
-
-### 4. Intelligence Gain Benchmark
-```bash
-python3 tests/benchmarks/intelligence_gain.py
+python3 examples/demo_pyterrier_bright.py
 ```
 
 ## Running Tests
