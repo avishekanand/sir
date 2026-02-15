@@ -6,7 +6,7 @@ This document acts as the single source of truth for the project.
 
 # RAGtune: Project Master Plan
 
-**Version:** 2.1 (Iterative Architecture)
+**Version:** 2.2 (Developer Experience & Vision)
 **Mission:** To build a **cost-aware, iterative retrieval controller** that optimizes information gain under strict budget constraints.
 
 ---
@@ -164,6 +164,29 @@ ragtune/
 4. **Enhanced Adapters**: Full feature parity for LangChain and LlamaIndex (streaming support, etc.).
 
 * **Exit Criteria**: A public benchmark table showing RAGtune's cost/accuracy Pareto curve on the full BRIGHT dataset.
+
+* **Status:** [COMPLETED]
+
+### Phase 5: v0.5 - Developer Experience (Weeks 11-12)
+
+**Goal:** Simplify configuration, deployment, and extensibility.
+
+* **Deliverables:**
+1. **RAGtune CLI:** `ragtune init`, `list`, `run` for terminal-based workflow.
+2. **Component Registry:** Decorator-based registration (`@reranker`) for easy custom components.
+3. **Unified Context:** Refactored core interfaces to use `RAGtuneContext`.
+4. **Generic Cost Interface:** Support for arbitrary cost metrics (e.g., GPU/FLOPS).
+
+* **Status:** [COMPLETED]
+
+### Phase 6: v0.52 - Visualization & Observability (Planned)
+
+**Goal:** Provide deep insights into the iterative loop's decision-making process.
+
+* **Deliverables:**
+1. **RAGtune Vision:** A web-based visualizer for `ControllerTrace`.
+2. **Real-time Telemetry:** WebSocket integration for live loop monitoring.
+3. **Debug Mode:** Step-through execution of the RAG pipeline.
 
 
 

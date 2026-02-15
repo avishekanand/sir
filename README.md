@@ -1,71 +1,128 @@
-# RAGtune (Version 0.5 - Developer Experience)
+# RAGtune 🎛️
 
-[**Release Log**](docs/RELEASE_LOG.md) | [**Roadmap**](docs/roadmap.md)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Status: Beta](https://img.shields.io/badge/Status-Beta-orange)]()
 
-RAGtune is a budget-aware, iterative RAG middleware that treats **cost** and **latency** as first-class constraints.
+**Budget-Aware, Iterative RAG Middleware with Active Learning.**
 
-## Architecture: The Active Loop
+> **RAGtune** transforms static RAG pipelines into dynamic, cost-sensitive feedback loops. It treats **cost** and **latency** as first-class constraints, optimizing information gain by iteratively sampling and reranking documents based on real-time feedback.
 
-Unlike traditional linear RAG pipelines, RAGtune uses an **Active Learning** feedback loop to dynamically discover and prioritize relevant documents in real-time.
+[**Explore Docs**](docs/concepts/architecture.md) · [**View Roadmap**](docs/roadmap.md) · [**Release Notes**](docs/RELEASE_LOG.md)
 
-1.  **Retrieve**: Fetch a candidate pool.
-2.  **Schedule**: Propose batches of documents to rerank based on predicted utility.
-3.  **Rerank**: Use high-confidence models (Cross-Encoders, LLMs) to score batches.
-4.  **Learn**: Feedback from scored docs boosts the priority of similar unranked docs (**Intelligence Layer**).
-5.  **Assemble**: Truncate results into the final context based on token budget.
+---
 
-## Project Structure
+## 🚀 Why RAGtune?
 
-- `src/ragtune/core/`: Orchestration logic, budget tracking, and interfaces.
-- `src/ragtune/components/`: Pluggable retrievers, rerankers, schedulers, and **Similarity Estimators**.
-- `src/ragtune/adapters/`: Adapters for external ecosystems (**LangChain**).
-- `src/ragtune/utils/`: Shared utilities like the professional **CLI Console**.
-- `tests/`: Unit and integration tests, plus performance benchmarks.
+Traditional RAG pipelines are **linear** (Retrieve → Rerank → Generate) and **cost-blind**. They either retrieve too little (missing context) or too much (wasting tokens and latency).
 
-## New in v0.4: Scaled Integrations & Benchmarking
+RAGtune introduces an **Active Learning Loop**:
 
-- **PyTerrier Adapter**: Full support for industrial IR pipelines.
-- **Ollama Listwise Reranker**: Reasoning-aware ranking via local DeepSeek models.
-- **Unified Benchmark Suite**: Professional IR metrics (nDCG@5, MRR) for benchmarking RAG efficiency.
-- **Scaled Collection**: Support for indexing 170k+ doc collections (TREC-COVID).
+| Feature | Description |
+| :--- | :--- |
+| **💰 Budget-First** | Define precise budgets for **Token Count**, **Latency (ms)**, and **GPU/API Costs**. The loop stops exactly when the budget is hit. |
+| **🔄 Iterative Feedback** | Uses a **Controller** to fetch documents in batches. High-scoring docs boost the priority of similar unranked candidates in real-time. |
+| **🧠 Intelligence Layer** | Pluggable **Estimators** (Similarity, Utility) predict which documents are worth paying to rerank next. |
+| **🔌 Ecosystem Ready** | Drop-in decorators for **LangChain**, **LlamaIndex**, and **PyTerrier** components. |
 
-## Quick Start
+---
 
-### 1. RAGtune CLI (New in v0.5)
-Initialize, configure, and run pipelines directly from the terminal.
+## 📦 Installation
 
 ```bash
-# Initialize a new config file
+# Clone the repository
+git clone https://github.com/yourusername/ragtune.git
+cd ragtune
+
+# Install in editable mode
+pip install -e .
+```
+
+---
+
+## ⚡ Quick Start
+
+The fastest way to use RAGtune is via the CLI (New in **v0.5**).
+
+### 1. Initialize a Project
+Scaffold a new configuration file with default settings.
+```bash
 ragtune init
-
-# List available components
-ragtune list
-
-# Run a pipeline
-ragtune run ragtune_config.yaml --query "What is active learning?"
+# Created 'ragtune_config.yaml'
 ```
 
-### 2. Unified Benchmarking Suite
+### 2. Configure Your Pipeline
+Edit `ragtune_config.yaml` to define your budget and components.
+```yaml
+pipeline:
+  budget:
+    tokens: 4000
+    latency_ms: 1500
+  components:
+    retriever:
+      type: "bm25"
+    reranker:
+      type: "cross-encoder"
+```
+
+### 3. Run the Pipeline
+Execute the pipeline instantly from the terminal.
 ```bash
-make run-benchmarks
+ragtune run ragtune_config.yaml --query "How does Active Learning optimize RAG?"
 ```
 
-### 2. Scaled PyTerrier Demo (ir_datasets)
-```bash
-make run-scaled-terrier
+---
+
+## 🏗️ Architecture
+
+RAGtune sits between your application and your data sources.
+
+```mermaid
+graph LR
+    User[User Query] --> Controller
+    subgraph "RAGtune Middleware"
+        Controller -- "Budget Check" --> Tracker[CostTracker]
+        Controller -- "Next Batch?" --> Scheduler
+        Scheduler -- "Propose" --> Reranker
+        Reranker -- "Feedback" --> Estimator
+        Estimator -- "Prioritize" --> Scheduler
+    end
+    Reranker --> FinalContext
 ```
 
-### 3. Basic Async Quickstart
-```bash
-python3 examples/quickstart.py
-```
+See [Architecture Docs](docs/concepts/architecture.md) for deep dives.
 
-### 4. Reasoning Demo (BRIGHT Dataset)
-```bash
-python3 examples/demo_pyterrier_bright.py
-```
+---
 
-## Running Tests
-```bash
-pytest
-```
+## 🧩 Integrations
+
+RAGtune plays nicely with your existing stack.
+
+*   **[LangChain](src/ragtune/adapters/langchain.py)**: Wrap any `Retriever` as a RAGtune source.
+*   **[LlamaIndex](src/ragtune/adapters/llamaindex.py)**: Use `QueryEngine` or retrievers directly.
+*   **[PyTerrier](src/ragtune/adapters/pyterrier.py)**: Full compatibility for IR research benchmarks.
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Roadmap](docs/roadmap.md) to find open tasks.
+
+1.  Fork the Project
+2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4.  Push to the Branch (`git push origin feature/AmazingFeature`)
+5.  Open a Pull Request
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `pyproject.toml` for details.
+
+---
+
+<p align="center">
+  Built with ❤️ by the RAGtune Team.
+</p>
