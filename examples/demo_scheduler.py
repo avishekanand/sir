@@ -11,7 +11,7 @@ from ragtune.components.retrievers import InMemoryRetriever
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.assemblers import GreedyAssembler
-from ragtune.components.schedulers import GreedyTieredScheduler
+from ragtune.components.schedulers import ActiveLearningScheduler
 
 def run_scheduler_demo():
     print("=== RAGtune Adaptive Scheduler Demo ===")
@@ -30,8 +30,8 @@ def run_scheduler_demo():
     reformulator = IdentityReformulator()
     reranker = SimulatedReranker()
     assembler = GreedyAssembler()
-    # Fast top 5, Thorough top 2
-    scheduler = GreedyTieredScheduler(fast_top_k=5, thorough_top_k=2)
+    # Using ActiveLearningScheduler as the new standard
+    scheduler = ActiveLearningScheduler(batch_size=2)
     
     # 3. Setup budget (Allow enough for multiple rerank rounds)
     budget = CostBudget(

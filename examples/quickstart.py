@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.budget import CostBudget
 from ragtune.core.types import ScoredDocument
@@ -5,6 +9,7 @@ from ragtune.components.retrievers import InMemoryRetriever
 from ragtune.components.rerankers import NoOpReranker
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
+from ragtune.components.schedulers import ActiveLearningScheduler
 
 # 1. Setup your knowledge base
 documents = [
@@ -19,9 +24,10 @@ reformulator = IdentityReformulator()
 reranker = NoOpReranker()
 assembler = GreedyAssembler()
 
-# 3. Create the controller with a default budget
+# 3. Create the controller with a default budget and scheduler
+scheduler = ActiveLearningScheduler(batch_size=2)
 default_budget = CostBudget(max_tokens=25, max_reranker_docs=10)
-controller = RAGtuneController(retriever, reformulator, reranker, assembler, default_budget)
+controller = RAGtuneController(retriever, reformulator, reranker, assembler, scheduler, default_budget)
 
 # 4. Run a query
 query = "What is RAGtune?"

@@ -46,20 +46,25 @@ def run_active_demo():
     output = controller.run("RAGtune")
     
     # 4. Verify Order
-    print("\n--- Execution Trace ---")
+    print("\n--- Execution Trace (Detailed) ---")
     rounds = []
     for event in output.trace.events:
+        print(f"[{event.timestamp:.4f}] [{event.component}] {event.action}: {event.details}")
         if event.component == "controller" and event.action == "rerank_batch":
-            print(f"Round: {event.details['doc_ids']} | Utility: {event.details['utility']:.2f}")
             rounds.append(event.details['doc_ids'][0])
     
-    print("\n--- Summary ---")
-    print(f"Ranking Order: {rounds}")
+    print("\n--- Adaptive Prioritization Summary ---")
+    print(f"Reranking Sequence: {' -> '.join(rounds)}")
     
     if rounds == ['doc_1', 'doc_2', 'doc_3']:
-        print("SUCCESS: doc_2 was prioritized over doc_3 due to feedback from doc_1!")
+        print("\n✅ SUCCESS: Active Learning worked!")
+        print("Detailed Explanation:")
+        print("1. doc_1 was reranked first and found to be highly relevant.")
+        print("2. The UtilityEstimator identified doc_2 as being in the same section as doc_1.")
+        print("3. doc_2's utility score was boosted, causing it to leapfrog doc_3 in the queue.")
+        print("4. Result: doc_2 was reranked before doc_3 despite doc_3 having a higher initial retrieval score.")
     else:
-        print(f"FAILURE: Expected ['doc_1', 'doc_2', 'doc_3'], got {rounds}")
+        print(f"\n❌ FAILURE: Expected ['doc_1', 'doc_2', 'doc_3'], got {rounds}")
 
 if __name__ == "__main__":
     run_active_demo()
