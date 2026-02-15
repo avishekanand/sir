@@ -1,4 +1,4 @@
-# RAGtune (Version 1.0 - Production Ready)
+# RAGtune (Version 0.3 - Production Readiness)
 
 RAGtune is a budget-aware, iterative RAG middleware that treats **cost** and **latency** as first-class constraints.
 

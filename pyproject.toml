@@ -1,6 +1,6 @@
 [project]
 name = "ragtune"
-version = "1.0.0"
+version = "0.3.0"
 authors = [
   { name="RAGtune Team", email="maintainers@ragtune.ai" },
 ]

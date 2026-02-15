@@ -142,14 +142,28 @@ ragtune/
 
 * **Exit Criteria:** Benchmark shows efficient budget utilization (Pareto improvement).
 
-### Phase 3: v1.0 - Production Ready (Weeks 5-8)
+### Phase 3: v0.3 - Production Readiness (Weeks 5-6)
 
-**Goal:** Usability and Integrations.
+**Goal:** Usability and Core ecosystem support.
 
 * **Deliverables:**
-1. **Adapters:** LangChain/LlamaIndex.
+1. **Adapters:** LangChain/LlamaIndex core implementations.
 2. **Async:** `arun()` for the loop.
-3. **Packaging:** PyPI release.
+3. **Packaging:** v0.3 alpha release.
+
+* **Status:** [COMPLETED]
+
+### Phase 4: v0.4 - Advanced Integrations & Benchmarking (Weeks 7-10)
+
+**Goal:** Broaden ecosystem reach and provide objective performance metrics.
+
+* **Deliverables:**
+1. **PyTerrier Adapter**: Integration for traditional IR researchers.
+2. **Hugging Face Integration**: Native loading of the full BRIGHT dataset.
+3. **The RAGtune Benchmark**: A standardized test harness to compare different `Estimator` algorithms (Utility vs Similarity) on the BRIGHT test set.
+4. **Enhanced Adapters**: Full feature parity for LangChain and LlamaIndex (streaming support, etc.).
+
+* **Exit Criteria**: A public benchmark table showing RAGtune's cost/accuracy Pareto curve on the full BRIGHT dataset.
 
 
 
@@ -228,13 +242,3 @@ class BatchProposal(BaseModel):
 
 * **Metric:** "Recall @ K Reranked Docs".
 * **Scenario:** Can we find the Golden Document by reranking only 10% of the pool?
-
----
-
-## 7. Immediate Next Actions
-
-1. **Initialize:** `uv init ragtune`.
-2. **Structure:** Create the folders, specifically `components/estimators.py` and `components/schedulers.py`.
-3. **Implement Core Types:** Add `BatchProposal` to `types.py`.
-4. **Implement Logic:** Write the **Iterative Controller Loop** first (it's the hardest logic).
-5. **Test:** Verify the loop spins correctly with `FakeReranker`.
