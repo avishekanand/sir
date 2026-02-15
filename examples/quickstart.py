@@ -10,41 +10,48 @@ from ragtune.components.rerankers import NoOpReranker
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
+from ragtune.utils.console import print_header, print_step, print_documents, print_trace, print_budget
 
-# 1. Setup your knowledge base
-documents = [
-    ScoredDocument(id="1", content="RAGtune handles budget constraints.", token_count=10),
-    ScoredDocument(id="2", content="It supports graceful degradation.", token_count=10),
-    ScoredDocument(id="3", content="Traceability is a core feature.", token_count=10),
-]
+def run_quickstart():
+    print_header("RAGtune Quickstart")
 
-# 2. Initialize components
-retriever = InMemoryRetriever(documents)
-reformulator = IdentityReformulator()
-reranker = NoOpReranker()
-assembler = GreedyAssembler()
+    # 1. Setup your knowledge base
+    print_step("Setting up knowledge base...")
+    documents = [
+        ScoredDocument(id="1", content="RAGtune handles budget constraints.", token_count=10),
+        ScoredDocument(id="2", content="It supports graceful degradation.", token_count=10),
+        ScoredDocument(id="3", content="Traceability is a core feature.", token_count=10),
+    ]
 
-# 3. Create the controller with a default budget and scheduler
-scheduler = ActiveLearningScheduler(batch_size=2)
-default_budget = CostBudget(max_tokens=25, max_reranker_docs=10)
-controller = RAGtuneController(retriever, reformulator, reranker, assembler, scheduler, default_budget)
+    # 2. Initialize components
+    retriever = InMemoryRetriever(documents)
+    controller = RAGtuneController(
+        retriever=retriever,
+        reformulator=IdentityReformulator(),
+        reranker=NoOpReranker(),
+        assembler=GreedyAssembler(),
+        scheduler=ActiveLearningScheduler(batch_size=2),
+        budget=CostBudget(max_tokens=25, max_reranker_docs=10)
+    )
 
-# 4. Run a query
-query = "What is RAGtune?"
-output = controller.run(query)
+    # 3. Run a query
+    query = "What is RAGtune?"
+    print_step(f"Running query: [italic]'{query}'[/italic]")
+    output = controller.run(query)
 
-print(f"Query: {output.query}")
-print(f"Retrieved {len(output.documents)} documents:")
-for doc in output.documents:
-    print(f"- {doc.content} (Tokens: {doc.token_count})")
+    # 4. Show results
+    print_documents(output.documents)
+    print_trace(output.trace.events)
+    print_budget(output.final_budget_state)
 
-# 5. Inspect the trace to see what happened
-print("\n--- Execution Trace ---")
-for event in output.trace.events:
-    print(f"[{event.component}] {event.action}: {event.details}")
+    # 5. Run with a strict budget to see degradation
+    print_header("Budget Enforcement Demo")
+    print_step("Running with Strict Budget (0 tokens max)")
+    strict_budget = CostBudget(max_tokens=0)
+    output_strict = controller.run(query, override_budget=strict_budget)
+    
+    from rich.console import Console
+    Console().print(f"Documents returned: [bold red]{len(output_strict.documents)}[/bold red] (Expected 0 due to budget)")
 
-# 6. Run with a strict budget to see degradation
-print("\n--- Running with Strict Budget (0 tokens) ---")
-strict_budget = CostBudget(max_tokens=0)
-output_strict = controller.run(query, override_budget=strict_budget)
-print(f"Documents returned: {len(output_strict.documents)}")
+if __name__ == "__main__":
+    run_quickstart()

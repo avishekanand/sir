@@ -9,6 +9,7 @@ class RerankStrategy(str, Enum):
     LLM = "llm"
     IDENTITY = "identity"
 
+
 class ScoredDocument(BaseModel):
     """Atomic unit of content."""
     id: str
@@ -19,8 +20,6 @@ class ScoredDocument(BaseModel):
     reranker_score: Optional[float] = None
     fusion_score: Optional[float] = None
     token_count: int = 0
-    
-    model_config = ConfigDict(frozen=True) # Hashable for sets
 
 class ReformulationResult(BaseModel):
     """Output of one retrieval path."""

@@ -1,7 +1,5 @@
 import sys
 import os
-
-# Add src to path to import ragtune
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from ragtune.core.types import ScoredDocument, RerankStrategy
@@ -12,59 +10,53 @@ from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
+from ragtune.utils.console import print_header, print_step, print_documents, print_trace, print_budget, console
 
 def run_active_demo():
-    print("=== RAGtune Active Learning Demo ===")
+    print_header("RAGtune Active Learning Demo")
     
     # 1. Setup Documents
-    # doc_1 (A, 0.5) - Winner
-    # doc_2 (A, 0.4) - Will be boosted to 0.48
-    # doc_3 (B, 0.45) - Static second choice
+    print_step("Initializing document pool with metadata clusters...")
     documents = [
         ScoredDocument(id="doc_1", content="RAGtune works.", metadata={"section": "A"}, token_count=10, score=0.5),
-        ScoredDocument(id="doc_2", content="Doc 2", metadata={"section": "A"}, token_count=10, score=0.4),
-        ScoredDocument(id="doc_3", content="Doc 3", metadata={"section": "B"}, token_count=10, score=0.45),
+        ScoredDocument(id="doc_2", content="Supporting details for A", metadata={"section": "A"}, token_count=10, score=0.4),
+        ScoredDocument(id="doc_3", content="Unrelated info in B", metadata={"section": "B"}, token_count=10, score=0.45),
     ]
     
     # 2. Setup Components
-    class FullRetriever(InMemoryRetriever):
-        def retrieve(self, query, top_k): return self.docs
-            
-    retriever = FullRetriever(documents)
-    scheduler = ActiveLearningScheduler(batch_size=1, strategy=RerankStrategy.CROSS_ENCODER)
-    
+    retriever = InMemoryRetriever(documents)
+    # Ensure retriever returns all docs for demo
+    retriever.retrieve = lambda q, top_k: documents 
+
     controller = RAGtuneController(
         retriever=retriever,
         reformulator=IdentityReformulator(),
         reranker=SimulatedReranker(),
         assembler=GreedyAssembler(),
-        scheduler=scheduler,
+        scheduler=ActiveLearningScheduler(batch_size=1, initial_strategy=RerankStrategy.CROSS_ENCODER),
         budget=CostBudget(max_tokens=50, max_reranker_docs=3)
     )
     
     # 3. Run
+    print_step("Executing Adaptive Reranking Loop...")
     output = controller.run("RAGtune")
     
-    # 4. Verify Order
-    print("\n--- Execution Trace (Detailed) ---")
-    rounds = []
-    for event in output.trace.events:
-        print(f"[{event.timestamp:.4f}] [{event.component}] {event.action}: {event.details}")
-        if event.component == "controller" and event.action == "rerank_batch":
-            rounds.append(event.details['doc_ids'][0])
+    # 4. Display results
+    print_documents(output.documents)
+    print_trace(output.trace.events)
     
-    print("\n--- Adaptive Prioritization Summary ---")
-    print(f"Reranking Sequence: {' -> '.join(rounds)}")
+    rounds = [e.details['doc_ids'][0] for e in output.trace.events if e.action == "rerank_batch"]
+    
+    console.print("\n[bold magenta]Adaptive Prioritization Summary[/bold magenta]")
+    console.print(f"Reranking Sequence: [bold blue]{' -> '.join(rounds)}[/bold blue]")
     
     if rounds == ['doc_1', 'doc_2', 'doc_3']:
-        print("\n✅ SUCCESS: Active Learning worked!")
-        print("Detailed Explanation:")
-        print("1. doc_1 was reranked first and found to be highly relevant.")
-        print("2. The UtilityEstimator identified doc_2 as being in the same section as doc_1.")
-        print("3. doc_2's utility score was boosted, causing it to leapfrog doc_3 in the queue.")
-        print("4. Result: doc_2 was reranked before doc_3 despite doc_3 having a higher initial retrieval score.")
+        console.print("\n[bold green]✅ SUCCESS: Active Learning worked![/bold green]")
+        console.print("[dim]1. doc_1 was reranked first and confirmed relevance.[/dim]")
+        console.print("[dim]2. UtilityEstimator boosted doc_2 because it shares metadata with doc_1.[/dim]")
+        console.print("[dim]3. doc_2 leapfrogged doc_3 despite having lower initial score.[/dim]")
     else:
-        print(f"\n❌ FAILURE: Expected ['doc_1', 'doc_2', 'doc_3'], got {rounds}")
+        console.print(f"\n[bold red]❌ FAILURE: Expected ['doc_1', 'doc_2', 'doc_3'], got {rounds}[/bold red]")
 
 if __name__ == "__main__":
     run_active_demo()
