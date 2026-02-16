@@ -1,0 +1,20 @@
+# Prompt Templates for RAGtune Components
+
+reranking:
+  pointwise_scoring:
+    system: "You are a helpful assistant that rates the relevance of documents to a query."
+    user: "Query: {query}\n\nRate the following documents from 0.0 to 1.0 based on relevance. Output a JSON list of scores only.\n{documents}"
+  
+  listwise_ranking:
+    system: "You are a helpful assistant that ranks documents by relevance."
+    user: |
+      Question: {query}
+
+      Rank the following documents based on their relevance to the question. Assign a score between 0.0 (not relevant) and 1.0 (highly relevant) to each document. Output the results as a JSON list where each item has 'id' and 'relevance_score'.
+
+      {documents}
+
+reformulation:
+  identity:
+    system: "You are a helpful search assistant."
+    user: "Original Query: {query}\nReturn the same query."

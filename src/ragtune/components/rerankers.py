@@ -1,12 +1,13 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from ragtune.core.interfaces import BaseReranker
 from ragtune.core.types import ScoredDocument, RAGtuneContext
 from ragtune.registry import registry
+from ragtune.utils.config import config
 
 @registry.reranker("noop")
 class NoOpReranker(BaseReranker):
     """Identity reranker that returns documents as is."""
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
         return documents
 
 @registry.reranker("cross-encoder")
@@ -16,7 +17,7 @@ class CrossEncoderReranker(BaseReranker):
         from sentence_transformers import CrossEncoder
         self.model = CrossEncoder(model_name)
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
         if not documents:
             return []
         
@@ -38,21 +39,29 @@ class LLMReranker(BaseReranker):
         import litellm
         self.model_name = model_name
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
         if not documents:
             return []
             
         import litellm
         import json
         
-        # Construct a scoring prompt
-        prompt = f"Query: {context.query}\n\nRate the following documents from 0.0 to 1.0 based on relevance. Output a JSON list of scores only.\n"
+        # Load prompt from config
+        sys_prompt = config.get_prompt("reranking.pointwise_scoring.system", "You are a helpful assistant.")
+        user_template = config.get_prompt("reranking.pointwise_scoring.user", "Query: {query}\n\nDocuments: {documents}")
+        
+        doc_list = ""
         for i, doc in enumerate(documents):
-            prompt += f"[{i}] {doc.content}\n"
+            doc_list += f"[{i}] {doc.content}\n"
             
+        user_prompt = user_template.format(query=context.query, documents=doc_list)
+        
         response = litellm.completion(
             model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
             response_format={"type": "json_object"}
         )
         
@@ -74,7 +83,7 @@ class LLMReranker(BaseReranker):
 @registry.reranker("simulated")
 class SimulatedReranker(BaseReranker):
     """Placeholder for testing."""
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
         results = []
         for doc in documents:
             is_match = context.query.lower() in doc.content.lower()
@@ -92,29 +101,31 @@ class OllamaListwiseReranker(BaseReranker):
         self.model_name = f"ollama/{model_name}"
         self.api_base = base_url
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
         if not documents:
             return []
             
         import litellm
         import json
         
-        # Construct a listwise ranking prompt
-        prompt = (
-            f"Question: {context.query}\n\n"
-            "Rank the following documents based on their relevance to the question. "
-            "Assign a score between 0.0 (not relevant) and 1.0 (highly relevant) to each document. "
-            "Output the results as a JSON list where each item has 'id' and 'relevance_score'.\n\n"
-        )
+        # Load prompt from config
+        sys_prompt = config.get_prompt("reranking.listwise_ranking.system", "You are a helpful assistant.")
+        user_template = config.get_prompt("reranking.listwise_ranking.user", "Query: {query}\n\nDocuments: {documents}")
         
+        doc_list = ""
         for doc in documents:
-            prompt += f"Document ID: {doc.id}\nContent: {doc.content[:500]}\n---\n"
+            doc_list += f"Document ID: {doc.id}\nContent: {doc.content[:500]}\n---\n"
             
+        user_prompt = user_template.format(query=context.query, documents=doc_list)
+        
         try:
             response = litellm.completion(
                 model=self.model_name,
                 api_base=self.api_base,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
                 response_format={"type": "json_object"}
             )
             
@@ -143,3 +154,28 @@ class OllamaListwiseReranker(BaseReranker):
             # Fallback to 0.0 scores if LLM fails
             print(f"Ollama Rerank Error: {e}")
             return [doc.model_copy(update={"score": 0.0, "reranker_score": 0.0}) for doc in documents]
+
+@registry.reranker("multi-strategy")
+class MultiStrategyReranker(BaseReranker):
+    """Router for multiple reranking strategies."""
+    def __init__(self, strategies: Dict[str, BaseReranker], default_strategy: Optional[str] = None):
+        self.strategies = strategies
+        self.default_strategy = default_strategy or "identity"
+
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+        target = strategy or self.default_strategy
+        reranker = self.strategies.get(target)
+        if not reranker:
+            # Fallback to identity or first available?
+            # Let's use identity if registered, else skip
+            return documents
+        
+        return reranker.rerank(documents, context, strategy=target)
+
+    async def arerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+        target = strategy or self.default_strategy
+        reranker = self.strategies.get(target)
+        if not reranker:
+            return documents
+        
+        return await reranker.arerank(documents, context, strategy=target)

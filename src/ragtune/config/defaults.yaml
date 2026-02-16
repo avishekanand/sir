@@ -1,0 +1,17 @@
+# Default Configuration for RAGtune
+
+retrieval:
+  pool_multiplier: 2.0
+  default_top_k: 10
+
+reranking:
+  batch_size: 5
+  llm_default_model: "gpt-4o-mini"
+  cross_encoder_default_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+scheduling:
+  default_llm_limit: 3
+  default_cross_encoder_limit: 10
+
+assembly:
+  token_buffer: 500

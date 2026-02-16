@@ -2,6 +2,7 @@ from typing import List, Optional
 from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext
 from ragtune.core.budget import CostBudget, CostTracker
 from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler
+from ragtune.utils.config import config
 
 class RAGtuneController:
     def __init__(
@@ -33,10 +34,15 @@ class RAGtuneController:
         
         # 2. Retrieval
         reformulation_results = []
+        # Dynamically determine top_k based on budget and configured multiplier
+        multiplier = config.get("retrieval.pool_multiplier", 2.0)
+        default_top_k = config.get("retrieval.default_top_k", 10)
+        
+        max_docs = budget.limits.get("rerank_docs", default_top_k)
+        top_k = int(max_docs * multiplier)
+        
         for q in queries:
-            # Create a temporary context for this sub-query if needed?
-            # For now, let's keep it simple.
-            docs = self.retriever.retrieve(context, top_k=10)
+            docs = self.retriever.retrieve(context, top_k=top_k)
             reformulation_results.append(
                 ReformulationResult(original_query=query, reformulated_query=q, candidates=docs)
             )
@@ -63,7 +69,7 @@ class RAGtuneController:
             batch_docs = [pool[i] for i in proposal.document_indices]
             
             if tracker.try_consume_rerank(len(batch_docs)):
-                reranked_batch = self.reranker.rerank(batch_docs, context)
+                reranked_batch = self.reranker.rerank(batch_docs, context, strategy=proposal.strategy)
                 
                 for idx, new_doc in zip(proposal.document_indices, reranked_batch):
                     pool[idx] = new_doc
@@ -105,8 +111,14 @@ class RAGtuneController:
         
         # 2. Retrieval
         reformulation_results = []
+        multiplier = config.get("retrieval.pool_multiplier", 2.0)
+        default_top_k = config.get("retrieval.default_top_k", 10)
+        
+        max_docs = budget.limits.get("rerank_docs", default_top_k)
+        top_k = int(max_docs * multiplier)
+        
         for q in queries:
-            docs = await self.retriever.aretrieve(context, top_k=10)
+            docs = await self.retriever.aretrieve(context, top_k=top_k)
             reformulation_results.append(
                 ReformulationResult(original_query=query, reformulated_query=q, candidates=docs)
             )
@@ -133,7 +145,7 @@ class RAGtuneController:
             batch_docs = [pool[i] for i in proposal.document_indices]
             
             if tracker.try_consume_rerank(len(batch_docs)):
-                reranked_batch = await self.reranker.arerank(batch_docs, context)
+                reranked_batch = await self.reranker.arerank(batch_docs, context, strategy=proposal.strategy)
                 
                 for idx, new_doc in zip(proposal.document_indices, reranked_batch):
                     pool[idx] = new_doc

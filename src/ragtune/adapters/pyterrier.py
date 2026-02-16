@@ -32,6 +32,7 @@ class PyTerrierRetriever(BaseRetriever):
         
         # Run retrieval
         res = self.pt_transformer.transform(queries_df)
+        # print(f"DEBUG: PyTerrier retrieved {len(res)} rows for top_k={top_k}")
         
         # Sort by score just in case and take top_k
         res = res.sort_values("score", ascending=False).head(top_k)
@@ -44,7 +45,9 @@ class PyTerrierRetriever(BaseRetriever):
             score = float(row.get("score", 0.0))
             
             # Extract metadata (any non-standard columns)
-            metadata = {k: v for k, v in row.to_dict().items() if k not in ["qid", "query", "docno", "docid", "text", "content", "score", "rank"]}
+            # Include 'rank' even if it's standard in PyTerrier to preserve initial retrieval order
+            metadata = {k: v for k, v in row.to_dict().items() if k not in ["qid", "query", "docno", "docid", "text", "content", "score"]}
+            metadata["initial_rank"] = int(row.get("rank", i))
             
             results.append(ScoredDocument(
                 id=doc_id,

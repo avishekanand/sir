@@ -12,11 +12,11 @@ class BaseRetriever(ABC):
 
 class BaseReranker(ABC):
     @abstractmethod
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
         pass
 
-    async def arerank(self, documents: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
-        return self.rerank(documents, context)
+    async def arerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+        return self.rerank(documents, context, strategy)
 
 class BaseReformulator(ABC):
     @abstractmethod

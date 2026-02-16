@@ -115,7 +115,7 @@ ragtune/
 
 ## 4. Development Roadmap
 
-### Phase 1: v0.1 - The Foundation (Weeks 1-2)
+### Phase 1: v0.1 - The Foundation
 
 **Goal:** A working **iterative loop** with "fake" components. It must demonstrate the *mechanism* of proposing batches and stopping when the budget is full.
 
@@ -129,7 +129,7 @@ ragtune/
 
 * **Exit Criteria:** `pytest` passes. Trace logs show "Batch 1 executed", "Batch 2 executed", "Batch 3 skipped (budget)".
 
-### Phase 2: v0.2 - The Intelligence (Weeks 3-4)
+### Phase 2: v0.2 - The Intelligence
 
 **Goal:** Real logic. The Estimator actually uses feedback to change rankings.
 
@@ -142,7 +142,7 @@ ragtune/
 
 * **Exit Criteria:** Benchmark shows efficient budget utilization (Pareto improvement).
 
-### Phase 3: v0.3 - Production Readiness (Weeks 5-6)
+### Phase 3: v0.3 - Production Readiness
 
 **Goal:** Usability and Core ecosystem support.
 

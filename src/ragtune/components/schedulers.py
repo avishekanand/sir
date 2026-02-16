@@ -65,3 +65,61 @@ class ActiveLearningScheduler(BaseScheduler):
             strategy=current_strategy,
             estimated_utility=avg_utility
         )
+@registry.scheduler("graceful-degradation")
+class GracefulDegradationScheduler(BaseScheduler):
+    """
+    Scheduler that follows a strict stage-based reranking:
+    1. LLM for first N docs
+    2. Cross-Encoder for next M docs
+    3. Rest stay as is (BM25)
+    """
+    def __init__(self, llm_limit: int = 3, cross_encoder_limit: int = 10, batch_size: int = 5):
+        self.llm_limit = llm_limit
+        self.cross_encoder_limit = cross_encoder_limit
+        self.batch_size = batch_size
+
+    def propose_next_batch(
+        self, 
+        pool: List[ScoredDocument], 
+        processed_indices: List[int], 
+        context: RAGtuneContext
+    ) -> Optional[BatchProposal]:
+        if len(processed_indices) >= len(pool):
+            return None
+
+        # Determine how many docs have been reranked by each strategy
+        # We assume the order of processing follows the requested degradation
+        
+        num_processed = len(processed_indices)
+        
+        if num_processed < self.llm_limit:
+            # Stage 1: LLM
+            rem = self.llm_limit - num_processed
+            batch_len = min(self.batch_size, rem)
+            strategy = RerankStrategy.LLM
+        elif num_processed < (self.llm_limit + self.cross_encoder_limit):
+            # Stage 2: Cross-Encoder
+            rem = (self.llm_limit + self.cross_encoder_limit) - num_processed
+            batch_len = min(self.batch_size, rem)
+            strategy = RerankStrategy.CROSS_ENCODER
+        else:
+            # Stage 3: Finished reranking
+            return None
+
+        # Pick the best remaining documents based on original retriever score
+        candidates = []
+        for i, doc in enumerate(pool):
+            if i not in processed_indices:
+                candidates.append((i, doc.score))
+        
+        if not candidates:
+            return None
+            
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        next_indices = [c[0] for c in candidates[:batch_len]]
+        
+        return BatchProposal(
+            document_indices=next_indices,
+            strategy=strategy,
+            estimated_utility=1.0 # Static priority
+        )
