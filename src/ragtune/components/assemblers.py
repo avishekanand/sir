@@ -24,6 +24,7 @@ class GreedyAssembler(BaseAssembler):
                 metadata=it.metadata,
                 score=it.final_score(),
                 reranker_score=it.reranker_score,
+                initial_rank=it.initial_rank,
                 original_score=max(it.sources.values()) if it.sources else 0.0
             )
             

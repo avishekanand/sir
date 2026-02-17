@@ -162,7 +162,7 @@ def run_comparison():
                 for i, doc in enumerate(output.documents[:5]):
                     rel_key = f"{query.query_id}-{doc.id}"
                     gt_relevance = str(qrels.get(rel_key, "N/A"))
-                    initial_rank = doc.metadata.get("initial_rank", "N/A")
+                    initial_rank = doc.initial_rank
                     
                     provenance = "BM25"
                     if i < scenario["llm_limit"]: provenance = "LLM"

@@ -47,9 +47,9 @@ def test_final_score_precedence():
     item.priority_value = 0.7
     assert item.final_score() == 0.7
     
-    # Reranker score set
+    # Reranker score set (gets 1000.0 offset)
     item.reranker_score = 0.9
-    assert item.final_score() == 0.9
+    assert item.final_score() == 1000.9
 
 def test_active_items_filtering():
     items = [

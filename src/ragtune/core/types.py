@@ -35,6 +35,7 @@ class ScoredDocument(BaseModel):
     original_score: float = 0.0  # From retriever
     reranker_score: Optional[float] = None
     fusion_score: Optional[float] = None
+    initial_rank: int = 0
     token_count: int = 0
 
 class ReformulationResult(BaseModel):

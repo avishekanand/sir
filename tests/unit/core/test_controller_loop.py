@@ -156,7 +156,7 @@ def test_e28_final_score_precedence():
         PoolItem(doc_id="d3", content="c3", sources={"ret": 0.5})
     ]
     # Test precedence on individual items
-    assert items[0].final_score() == 0.2
+    assert items[0].final_score() == 1000.2
     assert items[1].final_score() == 0.8
     assert items[2].final_score() == 0.5
     
@@ -168,7 +168,7 @@ def test_e28_final_score_precedence():
     ctx = RAGtuneContext(query="t", tracker=tracker)
     results = assembler.assemble(items, ctx)
     
-    # Sorted by final_score descending: d2 (0.8), d3 (0.5), d1 (0.2)
-    assert results[0].id == "d2"
-    assert results[1].id == "d3"
-    assert results[2].id == "d1"
+    # Sorted by final_score descending: d1 (1000.2), d2 (0.8), d3 (0.5)
+    assert results[0].id == "d1"
+    assert results[1].id == "d2"
+    assert results[2].id == "d3"
