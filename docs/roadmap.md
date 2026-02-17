@@ -129,7 +129,7 @@ ragtune/
 
 * **Exit Criteria:** `pytest` passes. Trace logs show "Batch 1 executed", "Batch 2 executed", "Batch 3 skipped (budget)".
 
-### Phase 2: v0.2 - The Intelligence
+### Phase 2: 0.54 - The Intelligence (Core v0.5)
 
 **Goal:** Real logic. The Estimator actually uses feedback to change rankings.
 
@@ -137,10 +137,10 @@ ragtune/
 1. **Smart Estimator:** Implement `SimilarityEstimator` (boost unranked docs similar to highly-scored ranked docs).
 2. **Real Rerankers:** `CrossEncoderReranker` (local) and `LLMReranker` (API).
 3. **Hybrid Scheduling:** Strategy switching (start with CrossEncoder, escalate to LLM if ambiguous).
-4. **Benchmarks:** Run on **HotpotQA**. Show that RAGtune finds the answer with fewer reranker calls than a standard "rerank all" pipeline.
+4. **State Machine:** Formal `CandidatePool` with `ItemState` guards.
+5. **Robust Testing:** 44 passing unit/integration tests for the core engine.
 
-
-* **Exit Criteria:** Benchmark shows efficient budget utilization (Pareto improvement).
+* **Status:** [COMPLETED]
 
 ### Phase 3: v0.3 - Production Readiness
 
@@ -198,18 +198,17 @@ ragtune/
 
 ```python
 class RAGtuneController:
-    def run(self, query: str, budget: Optional[CostBudget] = None) -> ControllerOutput:
+    def run(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
         """
         1. Init CostTracker(budget).
         2. Retrieve Candidates -> Populate Pool.
-        3. Loop:
-           a. Scheduler.propose_next_batch(pool, processed_indices, tracker)
-           b. If Proposal is None: Break.
-           c. Tracker.try_consume(proposal.cost):
-                - If Fail: Break.
-                - If Pass: Reranker.rerank(batch).
-           d. Update Pool scores (Feedback).
-           e. Add indices to processed_indices.
+        3. Loop (while not tracker.is_exhausted()):
+           a. Estimator.value(pool, context) -> Update priorities.
+           b. Scheduler.select_batch(pool, budget_view) -> Proposal.
+           c. If Proposal is None: Break.
+           d. Tracker.consume(proposal.expected_cost):
+           e. Reranker.rerank(batch_items, context, strategy).
+           f. Pool.update_scores(results).
         4. Assemble Final Context.
         5. Return Output + Trace.
         """
@@ -221,19 +220,18 @@ class RAGtuneController:
 ```python
 class BaseScheduler(ABC):
     @abstractmethod
-    def propose_next_batch(
+    def select_batch(
         self,
-        pool: List[ScoredDocument],
-        processed_indices: List[int],
-        tracker: CostTracker
+        pool: CandidatePool,
+        budget: RemainingBudgetView
     ) -> Optional[BatchProposal]:
         """
-        Returns indices of docs to rerank next.
+        Returns a BatchProposal for the next iteration.
         Returns None if:
-        - Pool is fully processed.
-        - Estimator sees no remaining value.
-        - Tracker says budget is critical (pre-check).
+        - No eligible documents remain.
+        - Budget view shows 0 remaining docs/calls.
         """
+```
 
 ```
 

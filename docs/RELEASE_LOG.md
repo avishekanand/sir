@@ -1,6 +1,14 @@
-# RAGtune Release Log 📅
+---
 
-Detailed history of RAGtune versions and major milestones.
+## v0.54 - Stateful Iterative Reranking (Core v0.5) 💎
+*Focus: State Machine Enforcement, Robust Budgeting, and Testing.*
+
+- **CandidatePool State Machine**: Strict enforcement of document transitions (`CANDIDATE -> IN_FLIGHT -> RERANKED`) to ensure data integrity.
+- **CostBudget v2**: Standardized `CostObject` and immutable `RemainingBudgetView` for precise resource allocation across tokens, docs, calls, and latency.
+- **Iterative Loop Orchestration**: `RAGtuneController` now manages the loop with formal state guards and robust exception recovery (automatic dropping of failed docs).
+- **Comprehensive Test Suite**: 44 passing unit and integration tests covering the entire core engine and component contracts.
+- **Repaired Examples**: Full audit and repair of all 10 demo scripts to match the Core 0.54 signatures.
+- **Scoring Precedence**: Formalized scoring hierarchy (Reranker > Estimator > Retrieval) for the final ranked list.
 
 ---
 

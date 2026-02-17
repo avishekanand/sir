@@ -4,11 +4,27 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
+class ItemState(str, Enum):
+    CANDIDATE = "candidate"  # Eligible for scheduling
+    IN_FLIGHT = "in_flight"  # Currently moving through a reranker
+    RERANKED = "reranked"    # Final reranker_score available
+    DROPPED = "dropped"      # Excluded from final results
+
 class RerankStrategy(str, Enum):
     CROSS_ENCODER = "cross_encoder"
     LLM = "llm"
     IDENTITY = "identity"
 
+class CostObject(BaseModel):
+    tokens: int = 0
+    docs: int = 0
+    calls: int = 0
+
+class RemainingBudgetView(BaseModel):
+    remaining_tokens: int
+    remaining_rerank_docs: int
+    remaining_rerank_calls: int
+    assembly_token_buffer: int
 
 class ScoredDocument(BaseModel):
     """Atomic unit of content."""
@@ -45,8 +61,9 @@ class ControllerTrace(BaseModel):
 
 class BatchProposal(BaseModel):
     """The Scheduler's command for the next iteration."""
-    document_indices: List[int]    # Indices in the master pool to process next
-    strategy: RerankStrategy       # Which model to use
+    doc_ids: List[str]            # Doc IDs to process next
+    strategy: RerankStrategy      # Which model to use
+    expected_cost: CostObject     # Expected consumption
     estimated_utility: float = 0.0 # Why we chose this batch (for debugging)
 
 class ControllerOutput(BaseModel):
@@ -63,3 +80,7 @@ class RAGtuneContext(BaseModel):
     query: str
     tracker: Any  # CostTracker
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+class IllegalTransitionError(Exception):
+    def __init__(self, doc_id: str, current: str, target: str):
+        super().__init__(f"Illegal transition for {doc_id}: {current} -> {target}")

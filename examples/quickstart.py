@@ -10,6 +10,7 @@ from ragtune.components.rerankers import NoOpReranker
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
+from ragtune.components.estimators import BaselineEstimator
 from ragtune.utils.console import print_header, print_step, print_documents, print_trace, print_budget
 
 def run_quickstart():
@@ -31,7 +32,8 @@ def run_quickstart():
         reranker=NoOpReranker(),
         assembler=GreedyAssembler(),
         scheduler=ActiveLearningScheduler(batch_size=2),
-        budget=CostBudget(max_tokens=25, max_reranker_docs=10)
+        estimator=BaselineEstimator(),
+        budget=CostBudget.simple(tokens=25, docs=10)
     )
 
     # 3. Run a query
@@ -47,7 +49,7 @@ def run_quickstart():
     # 5. Run with a strict budget to see degradation
     print_header("Budget Enforcement Demo")
     print_step("Running with Strict Budget (0 tokens max)")
-    strict_budget = CostBudget(max_tokens=0)
+    strict_budget = CostBudget.simple(tokens=0)
     output_strict = controller.run(query, override_budget=strict_budget)
     
     from rich.console import Console

@@ -25,6 +25,7 @@ from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
+from ragtune.components.estimators import BaselineEstimator
 
 try:
     from langchain_community.vectorstores import FAISS
@@ -67,7 +68,8 @@ def run_real_retriever_demo():
         reranker=SimulatedReranker(),
         assembler=GreedyAssembler(),
         scheduler=scheduler,
-        budget=budget
+        estimator=BaselineEstimator(),
+        budget=CostBudget.simple(tokens=30, docs=4)
     )
 
     # 5. Run it!
@@ -84,7 +86,7 @@ def run_real_retriever_demo():
     print("\n--- Iterative Execution Trace ---")
     for event in output.trace.events:
         if event.action == "rerank_batch":
-            print(f"Rerank Round: {event.details['doc_ids']} | Utility: {event.details['utility']:.2f}")
+            print(f"Rerank Round: {event.details['doc_ids']}")
         elif "deny" in event.action:
              print(f"Budget Denied: {event.action} - {event.details.get('reason')}")
 

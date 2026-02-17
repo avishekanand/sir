@@ -52,11 +52,9 @@ def run_ir_datasets_demo():
         reformulator=IdentityReformulator(),
         reranker=OllamaListwiseReranker(model_name="deepseek-r1:8b"), 
         assembler=GreedyAssembler(),
-        scheduler=ActiveLearningScheduler(
-            batch_size=2,
-            estimator=SimilarityEstimator()
-        ),
-        budget=CostBudget(max_reranker_docs=4) # Rerank top 4 across 2 batches
+        scheduler=ActiveLearningScheduler(batch_size=2),
+        estimator=SimilarityEstimator(),
+        budget=CostBudget.simple(docs=4) # Rerank top 4 across 2 batches
     )
     
     # 4. Run sample queries

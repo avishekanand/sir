@@ -74,18 +74,14 @@ def run_real_data_demo():
 
     # 3. Configure Controller with Intelligence (SimilarityEstimator)
     # This allows RAGtune to boost similar jobs if it finds a "winner"
-    scheduler = ActiveLearningScheduler(
-        batch_size=3, 
-        estimator=SimilarityEstimator()
-    )
-    
     controller = RAGtuneController(
         retriever=retriever,
         reformulator=IdentityReformulator(),
         reranker=SimulatedReranker(),
         assembler=GreedyAssembler(),
-        scheduler=scheduler,
-        budget=CostBudget(max_reranker_docs=9) # Allow 3 rounds of 3 docs
+        scheduler=ActiveLearningScheduler(batch_size=3),
+        estimator=SimilarityEstimator(),
+        budget=CostBudget.simple(docs=9) # Allow 3 rounds of 3 docs
     )
 
     # 4. Search!

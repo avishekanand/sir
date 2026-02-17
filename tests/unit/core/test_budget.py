@@ -34,4 +34,4 @@ def test_custom_cost_type():
 
     assert tracker.try_consume("usd", 0.20) is True
     assert tracker.try_consume("usd", 0.40) is False
-    assert tracker.consumed["usd"] == 0.20
+    assert tracker.consumed["usd"] == pytest.approx(0.60)

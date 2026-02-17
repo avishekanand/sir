@@ -10,6 +10,7 @@ from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
+from ragtune.components.estimators import UtilityEstimator
 from ragtune.utils.console import print_header, print_step, print_documents, print_trace, print_budget, console
 
 def run_active_demo():
@@ -33,8 +34,9 @@ def run_active_demo():
         reformulator=IdentityReformulator(),
         reranker=SimulatedReranker(),
         assembler=GreedyAssembler(),
-        scheduler=ActiveLearningScheduler(batch_size=1, initial_strategy=RerankStrategy.CROSS_ENCODER),
-        budget=CostBudget(max_tokens=50, max_reranker_docs=3)
+        scheduler=ActiveLearningScheduler(batch_size=1, strategy="cross_encoder"),
+        estimator=UtilityEstimator(),
+        budget=CostBudget.simple(tokens=50, docs=3)
     )
     
     # 3. Run

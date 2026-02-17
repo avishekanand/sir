@@ -1,14 +1,15 @@
-from typing import List, Optional, Dict
+from typing import List, Dict, Optional, Any, Union
+from ragtune.core.pool import PoolItem
+from ragtune.core.types import RerankStrategy, RAGtuneContext
 from ragtune.core.interfaces import BaseReranker
-from ragtune.core.types import ScoredDocument, RAGtuneContext
 from ragtune.registry import registry
 from ragtune.utils.config import config
 
 @registry.reranker("noop")
 class NoOpReranker(BaseReranker):
     """Identity reranker that returns documents as is."""
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
-        return documents
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+        return {doc.doc_id: doc.final_score() for doc in documents}
 
 @registry.reranker("cross-encoder")
 class CrossEncoderReranker(BaseReranker):
@@ -17,82 +18,65 @@ class CrossEncoderReranker(BaseReranker):
         from sentence_transformers import CrossEncoder
         self.model = CrossEncoder(model_name)
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
         if not documents:
-            return []
-        
+            return {}
+            
         pairs = [[context.query, doc.content] for doc in documents]
         scores = self.model.predict(pairs)
         
-        results = []
-        for doc, score in zip(documents, scores):
-            results.append(doc.model_copy(update={
-                "score": float(score),
-                "reranker_score": float(score)
-            }))
-        return results
+        return {doc.doc_id: float(score) for doc, score in zip(documents, scores)}
 
 @registry.reranker("llm")
 class LLMReranker(BaseReranker):
     """API-based reranking using LiteLLM for broad model support."""
     def __init__(self, model_name: str = "gpt-4o-mini"):
         import litellm
-        self.model_name = model_name
+        self.model = model_name
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
         if not documents:
-            return []
+            return {}
             
         import litellm
-        import json
         
-        # Load prompt from config
-        sys_prompt = config.get_prompt("reranking.pointwise_scoring.system", "You are a helpful assistant.")
-        user_template = config.get_prompt("reranking.pointwise_scoring.user", "Query: {query}\n\nDocuments: {documents}")
+        prompts = config.get("prompts.reranking.pointwise")
+        system_prompt = prompts.get("system")
+        user_prompt_template = prompts.get("user")
         
-        doc_list = ""
-        for i, doc in enumerate(documents):
-            doc_list += f"[{i}] {doc.content}\n"
+        scores = {}
+        for doc in documents:
+            user_prompt = user_prompt_template.format(query=context.query, document=doc.content)
             
-        user_prompt = user_template.format(query=context.query, documents=doc_list)
-        
-        response = litellm.completion(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
-        
-        # Parsing logic (simplified for v0.2)
-        content = response.choices[0].message.content
-        try:
-            raw_scores = json.loads(content).get("scores", [])
-        except:
-            raw_scores = [0.0] * len(documents)
+            response = litellm.completion(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
             
-        results = []
-        for doc, score in zip(documents, raw_scores):
-            results.append(doc.model_copy(update={
-                "score": float(score),
-                "reranker_score": float(score)
-            }))
-        return results
+            try:
+                import json
+                result = json.loads(response.choices[0].message.content)
+                score = float(result.get("relevance_score", 0.0))
+                scores[doc.doc_id] = score
+            except (ValueError, KeyError, AttributeError):
+                scores[doc.doc_id] = 0.0
+                
+        return scores
 
 @registry.reranker("simulated")
 class SimulatedReranker(BaseReranker):
     """Placeholder for testing."""
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
-        results = []
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+        scores = {}
         for doc in documents:
             is_match = context.query.lower() in doc.content.lower()
             reranker_score = 0.95 if is_match else 0.3
-            results.append(doc.model_copy(update={
-                "score": reranker_score,
-                "reranker_score": reranker_score
-            }))
-        return results
+            scores[doc.doc_id] = reranker_score
+        return scores
 
 @registry.reranker("ollama-listwise")
 class OllamaListwiseReranker(BaseReranker):
@@ -101,20 +85,20 @@ class OllamaListwiseReranker(BaseReranker):
         self.model_name = f"ollama/{model_name}"
         self.api_base = base_url
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
         if not documents:
-            return []
+            return {}
             
         import litellm
         import json
         
-        # Load prompt from config
-        sys_prompt = config.get_prompt("reranking.listwise_ranking.system", "You are a helpful assistant.")
-        user_template = config.get_prompt("reranking.listwise_ranking.user", "Query: {query}\n\nDocuments: {documents}")
+        prompts = config.get("prompts.reranking.listwise")
+        sys_prompt = prompts.get("system")
+        user_template = prompts.get("user")
         
         doc_list = ""
         for doc in documents:
-            doc_list += f"Document ID: {doc.id}\nContent: {doc.content[:500]}\n---\n"
+            doc_list += f"Document ID: {doc.doc_id}\nContent: {doc.content[:500]}\n---\n"
             
         user_prompt = user_template.format(query=context.query, documents=doc_list)
         
@@ -130,30 +114,19 @@ class OllamaListwiseReranker(BaseReranker):
             )
             
             content = response.choices[0].message.content
-            # Handle potential markdown wrappers if the model returns them
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             
             data = json.loads(content)
-            # Find the list in the JSON (might be under a key like 'rankings' or 'scores')
             rankings = data if isinstance(data, list) else (data.get("rankings") or data.get("scores") or [])
             
-            # Map scores back to documents
-            score_map = {str(item.get("id")): float(item.get("relevance_score", 0.0)) for item in rankings}
+            score_map = {str(item.get("doc_id") or item.get("id")): float(item.get("relevance_score", 0.0)) for item in rankings}
             
-            results = []
-            for doc in documents:
-                score = score_map.get(str(doc.id), 0.0)
-                results.append(doc.model_copy(update={
-                    "score": score,
-                    "reranker_score": score
-                }))
-            return results
+            return {doc.doc_id: score_map.get(doc.doc_id, 0.0) for doc in documents}
             
         except Exception as e:
-            # Fallback to 0.0 scores if LLM fails
             print(f"Ollama Rerank Error: {e}")
-            return [doc.model_copy(update={"score": 0.0, "reranker_score": 0.0}) for doc in documents]
+            return {doc.doc_id: 0.0 for doc in documents}
 
 @registry.reranker("multi-strategy")
 class MultiStrategyReranker(BaseReranker):
@@ -162,20 +135,16 @@ class MultiStrategyReranker(BaseReranker):
         self.strategies = strategies
         self.default_strategy = default_strategy or "identity"
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
-        target = strategy or self.default_strategy
-        reranker = self.strategies.get(target)
-        if not reranker:
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+        if not strategy or strategy not in self.strategies:
             # Fallback to identity or first available?
             # Let's use identity if registered, else skip
-            return documents
+            return self.strategies[RerankStrategy.IDENTITY].rerank(documents, context)
         
-        return reranker.rerank(documents, context, strategy=target)
+        return self.strategies[strategy].rerank(documents, context)
 
-    async def arerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
-        target = strategy or self.default_strategy
-        reranker = self.strategies.get(target)
-        if not reranker:
-            return documents
+    async def arerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+        if not strategy or strategy not in self.strategies:
+            return await self.strategies[RerankStrategy.IDENTITY].arerank(documents, context)
         
-        return await reranker.arerank(documents, context, strategy=target)
+        return await self.strategies[strategy].arerank(documents, context, strategy=strategy)

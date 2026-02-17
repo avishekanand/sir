@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
-from ragtune.core.types import ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext
+from typing import List, Optional, Dict
+from ragtune.core.types import ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext, RemainingBudgetView
+from ragtune.core.pool import CandidatePool, PoolItem
 
 class BaseRetriever(ABC):
     @abstractmethod
@@ -12,10 +13,11 @@ class BaseRetriever(ABC):
 
 class BaseReranker(ABC):
     @abstractmethod
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+        """Returns {doc_id: score}."""
         pass
 
-    async def arerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> List[ScoredDocument]:
+    async def arerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
         return self.rerank(documents, context, strategy)
 
 class BaseReformulator(ABC):
@@ -28,26 +30,30 @@ class BaseReformulator(ABC):
 
 class BaseAssembler(ABC):
     @abstractmethod
-    def assemble(self, candidates: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    def assemble(self, candidates: List[PoolItem], context: RAGtuneContext) -> List[ScoredDocument]:
         pass
 
-    async def aassemble(self, candidates: List[ScoredDocument], context: RAGtuneContext) -> List[ScoredDocument]:
+    async def aassemble(self, candidates: List[PoolItem], context: RAGtuneContext) -> List[ScoredDocument]:
         return self.assemble(candidates, context)
+
+class BaseEstimator(ABC):
+    @abstractmethod
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, float]:
+        """Calculates priority_value for all eligible items."""
+        pass
 
 class BaseScheduler(ABC):
     @abstractmethod
-    def propose_next_batch(
+    def select_batch(
         self,
-        pool: List[ScoredDocument],
-        processed_indices: List[int],
-        context: RAGtuneContext
+        pool: CandidatePool,
+        budget: RemainingBudgetView
     ) -> Optional[BatchProposal]:
         pass
 
-    async def apropose_next_batch(
+    async def aselect_batch(
         self,
-        pool: List[ScoredDocument],
-        processed_indices: List[int],
-        context: RAGtuneContext
+        pool: CandidatePool,
+        budget: RemainingBudgetView
     ) -> Optional[BatchProposal]:
-        return self.propose_next_batch(pool, processed_indices, context)
+        return self.select_batch(pool, budget)

@@ -59,17 +59,14 @@ def run_pyterrier_demo():
     # RAGtune Retriever Adapter (wraps BM25)
     ragtune_retriever = PyTerrierRetriever(bm25)
     
-    # RAGtune Controller
     controller = RAGtuneController(
         retriever=ragtune_retriever,
         reformulator=IdentityReformulator(),
         reranker=OllamaListwiseReranker(model_name="deepseek-r1:8b"), 
         assembler=GreedyAssembler(),
-        scheduler=ActiveLearningScheduler(
-            batch_size=2,
-            estimator=SimilarityEstimator()
-        ),
-        budget=CostBudget(max_reranker_docs=4)
+        scheduler=ActiveLearningScheduler(batch_size=2),
+        estimator=SimilarityEstimator(),
+        budget=CostBudget.simple(docs=4)
     )
     
     # 4. Integrate back into PyTerrier as a Transformer

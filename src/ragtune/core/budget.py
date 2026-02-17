@@ -1,6 +1,7 @@
-from typing import Optional, Dict, Any
 import time
-from ragtune.core.types import ControllerTrace
+from typing import Optional, Dict, Any
+from ragtune.core.types import ControllerTrace, CostObject, RemainingBudgetView
+from ragtune.utils.config import config
 from pydantic import BaseModel, Field, model_validator
 
 class CostBudget(BaseModel):
@@ -11,6 +12,7 @@ class CostBudget(BaseModel):
     limits: Dict[str, float] = Field(default_factory=lambda: {
         "tokens": 4000,
         "rerank_docs": 50,
+        "rerank_calls": 10,
         "reformulations": 1,
         "latency_ms": 2000.0
     })
@@ -36,10 +38,11 @@ class CostBudget(BaseModel):
         return data
 
     @classmethod
-    def simple(cls, tokens=4000, docs=50, reformulations=1, latency=2000.0):
+    def simple(cls, tokens=4000, docs=50, calls=10, reformulations=1, latency=2000.0):
         return cls(limits={
             "tokens": tokens,
             "rerank_docs": docs,
+            "rerank_calls": calls,
             "reformulations": reformulations,
             "latency_ms": latency
         })
@@ -54,6 +57,32 @@ class CostTracker:
     @property
     def elapsed_ms(self) -> float:
         return (time.time() - self._start_time) * 1000
+
+    def is_exhausted(self) -> bool:
+        """Check if any critical budget is zero/negative."""
+        # For simple v0.54, we just check tokens and docs
+        if "tokens" in self.budget.limits and self.consumed.get("tokens", 0) >= self.budget.limits["tokens"]:
+            return True
+        if "rerank_docs" in self.budget.limits and self.consumed.get("rerank_docs", 0) >= self.budget.limits["rerank_docs"]:
+            return True
+        if "latency_ms" in self.budget.limits and self.elapsed_ms >= self.budget.limits["latency_ms"]:
+            return True
+        return False
+
+    def remaining_view(self) -> RemainingBudgetView:
+        """Provides an immutable-ish view of what's left for the Scheduler."""
+        return RemainingBudgetView(
+            remaining_tokens=max(0, int(self.budget.limits.get("tokens", 0) - self.consumed.get("tokens", 0))),
+            remaining_rerank_docs=max(0, int(self.budget.limits.get("rerank_docs", 0) - self.consumed.get("rerank_docs", 0))),
+            remaining_rerank_calls=max(0, int(self.budget.limits.get("rerank_calls", 0) - self.consumed.get("rerank_calls", 0))),
+            assembly_token_buffer=int(config.get("assembly.token_buffer", 500))
+        )
+
+    def consume(self, cost: CostObject):
+        """Standardized consumption of a CostObject."""
+        if cost.tokens > 0: self.try_consume("tokens", cost.tokens)
+        if cost.docs > 0: self.try_consume("rerank_docs", cost.docs)
+        if cost.calls > 0: self.try_consume("rerank_calls", cost.calls)
 
     def try_consume(self, cost_type: str, amount: float = 1.0) -> bool:
         """Generic consumption method for any cost type."""
@@ -73,12 +102,13 @@ class CostTracker:
             return True
 
         current = self.consumed.get(cost_type, 0.0)
-        if current + amount <= limit:
-            self.consumed[cost_type] = current + amount
+        self.consumed[cost_type] = current + amount
+        
+        if self.consumed[cost_type] <= limit:
             self.trace.add("budget", f"consume_{cost_type}", count=amount, total=self.consumed[cost_type])
             return True
         
-        self.trace.add("budget", f"deny_{cost_type}", reason="limit_reached", requested=amount, current=current, limit=limit)
+        self.trace.add("budget", f"over_limit_{cost_type}", count=amount, total=self.consumed[cost_type], limit=limit)
         return False
 
     # Legacy-style helpers for convenience

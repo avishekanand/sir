@@ -12,6 +12,7 @@ from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
+from ragtune.components.estimators import BaselineEstimator
 
 def run_scheduler_demo():
     print("=== RAGtune Adaptive Scheduler Demo ===")
@@ -48,7 +49,8 @@ def run_scheduler_demo():
         reranker=reranker,
         assembler=assembler,
         scheduler=scheduler,
-        budget=budget
+        estimator=BaselineEstimator(),
+        budget=CostBudget.simple(tokens=50, docs=10, reformulations=1, latency=2000.0)
     )
     
     # 5. Run pipeline

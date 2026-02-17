@@ -1,93 +1,88 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 import numpy as np
-from ragtune.core.types import ScoredDocument, RAGtuneContext
+from ragtune.core.types import RAGtuneContext
+from ragtune.core.interfaces import BaseEstimator
+from ragtune.core.pool import CandidatePool, ItemState
 
-class UtilityEstimator:
+class BaselineEstimator(BaseEstimator):
     """
-    Baseline: Predicts utility based on simple metadata overlap.
+    Returns the maximum retrieval score across all sources.
     """
-    def estimate(
-        self, 
-        pool: List[ScoredDocument], 
-        ranked_indices: List[int],
-        context: RAGtuneContext
-    ) -> List[float]:
-        estimates = [d.score for d in pool]
-        if not ranked_indices:
-            return estimates
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, float]:
+        priorities = {}
+        for item in pool.get_eligible():
+            priorities[item.doc_id] = max(item.sources.values()) if item.sources else 0.0
+        return priorities
 
-        winners = [pool[i] for i in ranked_indices if (pool[i].reranker_score or 0) > 0.8]
+class UtilityEstimator(BaseEstimator):
+    """
+    Predicts utility based on simple metadata overlap with already reranked winners.
+    """
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, float]:
+        eligible = pool.get_eligible()
+        if not eligible:
+            return {}
+
+        active = pool.get_active_items()
+        winners = [it for it in active if it.state == ItemState.RERANKED and (it.reranker_score or 0) > 0.8]
+        
+        priorities = {it.doc_id: (max(it.sources.values()) if it.sources else 0.0) for it in eligible}
+        
         if winners:
-            for i, doc in enumerate(pool):
-                if i in ranked_indices: continue
+            for it in eligible:
                 for winner in winners:
                     for key in ['source', 'section', 'category']:
-                        if key in doc.metadata and key in winner.metadata:
-                            if doc.metadata[key] == winner.metadata[key]:
-                                estimates[i] *= 1.2
+                        if key in it.metadata and key in winner.metadata:
+                            if it.metadata[key] == winner.metadata[key]:
+                                priorities[it.doc_id] *= 1.2
                                 break
-        return estimates
+        return priorities
 
-class SimilarityEstimator:
+class SimilarityEstimator(BaseEstimator):
     """
     Intelligence: Predicts utility using semantic similarity (Embeddings).
     """
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         from sentence_transformers import SentenceTransformer
         self.model = SentenceTransformer(model_name)
-        self._pool_embeddings: Optional[np.ndarray] = None
-        self._pool_ids: List[str] = []
+        self._cache_embeddings: Dict[str, np.ndarray] = {}
 
-    def _ensure_embeddings(self, pool: List[ScoredDocument]):
-        """Caches embeddings for the current pool to avoid re-computation."""
-        current_ids = [d.id for d in pool]
-        if self._pool_ids != current_ids:
-            texts = [d.content for d in pool]
-            self._pool_embeddings = self.model.encode(texts, convert_to_numpy=True)
-            self._pool_ids = current_ids
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, float]:
+        eligible = pool.get_eligible()
+        if not eligible:
+            return {}
 
-    def estimate(
-        self, 
-        pool: List[ScoredDocument], 
-        ranked_indices: List[int],
-        context: RAGtuneContext
-    ) -> List[float]:
-        self._ensure_embeddings(pool)
-        estimates = np.array([d.score for d in pool], dtype=float)
+        active = pool.get_active_items()
+        reranked = [it for it in active if it.state == ItemState.RERANKED]
+        winners = [it for it in reranked if (it.reranker_score or 0) > 0.8]
         
-        if not ranked_indices or self._pool_embeddings is None:
-            return estimates.tolist()
-
-        # Identify "Winners" and their embeddings
-        winner_indices = [i for i in ranked_indices if (pool[i].reranker_score or 0) > 0.8]
-        if not winner_indices:
-            return estimates.tolist()
-
-        winner_embeddings = self._pool_embeddings[winner_indices]
+        priorities = {it.doc_id: (max(it.sources.values()) if it.sources else 0.0) for it in eligible}
         
-        # Compute cosine similarity between ALL docs and winners
-        # Handle zero-norm embeddings to avoid NaN
-        pool_norms = np.linalg.norm(self._pool_embeddings, axis=1, keepdims=True)
-        winner_norms = np.linalg.norm(winner_embeddings, axis=1, keepdims=True)
+        if not winners:
+            return priorities
+
+        # Encode eligible and winners
+        eligible_texts = [it.content for it in eligible]
+        winner_texts = [it.content for it in winners]
         
-        # Replace 0 norms with 1 to avoid division by zero (similarity will be 0 anyway)
-        pool_norms[pool_norms == 0] = 1.0
+        eligible_embs = self.model.encode(eligible_texts, convert_to_numpy=True)
+        winner_embs = self.model.encode(winner_texts, convert_to_numpy=True)
+
+        # Compute cosine similarity
+        eligible_norms = np.linalg.norm(eligible_embs, axis=1, keepdims=True)
+        winner_norms = np.linalg.norm(winner_embs, axis=1, keepdims=True)
+        
+        eligible_norms[eligible_norms == 0] = 1.0
         winner_norms[winner_norms == 0] = 1.0
         
-        norm_pool = self._pool_embeddings / pool_norms
-        norm_winners = winner_embeddings / winner_norms
+        norm_eligible = eligible_embs / eligible_norms
+        norm_winners = winner_embs / winner_norms
         
-        # similarities shape: (len(pool), len(winners))
-        similarities = np.dot(norm_pool, norm_winners.T)
-        
-        # Max similarity to any winner
+        similarities = np.dot(norm_eligible, norm_winners.T)
         max_sims = np.max(similarities, axis=1)
         
-        # Boost unranked docs based on similarity
-        # We use a linear boost: score * (1 + similarity * weight)
         boost_weight = 0.5 
-        for i in range(len(pool)):
-            if i not in ranked_indices:
-                estimates[i] *= (1.0 + max_sims[i] * boost_weight)
+        for i, it in enumerate(eligible):
+            priorities[it.doc_id] *= (1.0 + max_sims[i] * boost_weight)
 
-        return estimates.tolist()
+        return priorities

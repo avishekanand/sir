@@ -22,6 +22,7 @@ from ragtune.components.rerankers import (
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import GracefulDegradationScheduler
+from ragtune.components.estimators import BaselineEstimator
 from ragtune.utils.console import print_header, print_step, print_success, print_budget
 from ragtune.utils.config import config
 import numpy as np
@@ -93,11 +94,11 @@ def run_comparison():
     console.print(f"[dim]Loaded {len(qrels)} qrels. Sample keys: {list(qrels.keys())[:3]}[/dim]")
     
     # 2. Setup Multi-Strategy Reranker
-    from ragtune.components.rerankers import SimulatedReranker
+    from ragtune.core.types import RerankStrategy
     strategies = {
-        RerankStrategy.LLM: SimulatedReranker(), 
-        RerankStrategy.CROSS_ENCODER: CrossEncoderReranker(),
-        RerankStrategy.IDENTITY: NoOpReranker()
+        "llm": SimulatedReranker(), 
+        "cross_encoder": CrossEncoderReranker(),
+        "identity": NoOpReranker()
     }
     
     reranker = MultiStrategyReranker(strategies=strategies)
@@ -125,11 +126,8 @@ def run_comparison():
     
     results_summary = []
 
-    for scense in scenarios:
-        console.print(f"\n[bold yellow]>>> Evaluating {scense['name']}...[/bold yellow]")
-        for q in queries:
-            console.print(f"[dim]Debug: Checking Query ID '{q.query_id}'[/dim]")
-            break
+    for scenario in scenarios:
+        console.print(f"\n[bold yellow]>>> Evaluating {scenario['name']}...[/bold yellow]")
         
         scenario_metrics = {"ndcg": [], "precision": [], "mrr": []}
         
@@ -139,11 +137,12 @@ def run_comparison():
             reranker=reranker,
             assembler=GreedyAssembler(),
             scheduler=GracefulDegradationScheduler(
-                llm_limit=scense["llm_limit"],
-                cross_encoder_limit=scense["ce_limit"],
+                llm_limit=scenario["llm_limit"],
+                cross_encoder_limit=scenario["ce_limit"],
                 batch_size=5
             ),
-            budget=scense["budget"]
+            estimator=BaselineEstimator(),
+            budget=scenario["budget"]
         )
 
         for q_idx, query in enumerate(queries):
@@ -158,15 +157,15 @@ def run_comparison():
             # For the VERY first query, show verbose document breakdown
             if q_idx == 0:
                 print_budget(output.final_budget_state)
-                console.print(f"\n[bold underline]Detailed Breakdown (Query 1): {scense['name']}[/bold underline]")
+                console.print(f"\n[bold underline]Detailed Breakdown (Query 1): {scenario['name']}[/bold underline]")
                 for i, doc in enumerate(output.documents[:5]):
                     rel_key = f"{query.query_id}-{doc.id}"
                     gt_relevance = str(qrels.get(rel_key, "N/A"))
                     initial_rank = doc.metadata.get("initial_rank", "N/A")
                     
                     provenance = "BM25"
-                    if i < scense["llm_limit"]: provenance = "LLM"
-                    elif i < (scense["llm_limit"] + scense["ce_limit"]): provenance = "Cross-Encoder"
+                    if i < scenario["llm_limit"]: provenance = "LLM"
+                    elif i < (scenario["llm_limit"] + scenario["ce_limit"]): provenance = "Cross_Encoder"
                     
                     title = doc.metadata.get("title", "No Title")
                     console.print(f"[bold]Rank {i+1}:[/bold] {doc.id} | [green]{provenance}[/green] | [cyan]InitRank: {initial_rank}[/cyan] | [bold magenta]GT Rel: {gt_relevance}[/bold magenta]")
@@ -178,7 +177,7 @@ def run_comparison():
         avg_mrr = np.mean(scenario_metrics["mrr"])
         
         results_summary.append({
-            "Scenario": scense["name"],
+            "Scenario": scenario["name"],
             "nDCG@5": f"{avg_ndcg:.4f}",
             "P@5": f"{avg_prec:.4f}",
             "MRR": f"{avg_mrr:.4f}"

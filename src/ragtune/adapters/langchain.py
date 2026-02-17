@@ -45,3 +45,40 @@ class LangChainRetriever(BaseRetriever):
             ))
             
         return results
+
+class RAGtuneLangChainAdapter:
+    """
+    Exposes a RAGtuneController as a LangChain-compatible retriever.
+    """
+    def __init__(self, controller: Any):
+        self.controller = controller
+
+    def invoke(self, query: str, **kwargs) -> List[Any]:
+        from langchain_core.documents import Document
+        output = self.controller.run(query)
+        
+        return [
+            Document(
+                page_content=doc.content,
+                metadata={
+                    "id": doc.id,
+                    "final_score": doc.score,
+                    **doc.metadata
+                }
+            ) for doc in output.documents
+        ]
+
+    async def ainvoke(self, query: str, **kwargs) -> List[Any]:
+        from langchain_core.documents import Document
+        output = await self.controller.arun(query)
+        
+        return [
+            Document(
+                page_content=doc.content,
+                metadata={
+                    "id": doc.id,
+                    "final_score": doc.score,
+                    **doc.metadata
+                }
+            ) for doc in output.documents
+        ]

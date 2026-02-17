@@ -70,18 +70,14 @@ def run_bright_demo():
     retriever = LangChainRetriever(vectorstore.as_retriever(search_kwargs={"k": 5}))
 
     # 3. Configure Controller
-    scheduler = ActiveLearningScheduler(
-        batch_size=2, 
-        estimator=SimilarityEstimator()
-    )
-    
     controller = RAGtuneController(
         retriever=retriever,
         reformulator=IdentityReformulator(),
         reranker=SimulatedReranker(),
         assembler=GreedyAssembler(),
-        scheduler=scheduler,
-        budget=CostBudget(max_reranker_docs=4)
+        scheduler=ActiveLearningScheduler(batch_size=2),
+        estimator=SimilarityEstimator(),
+        budget=CostBudget.simple(docs=4)
     )
 
     # 4. Search

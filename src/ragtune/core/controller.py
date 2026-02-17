@@ -1,7 +1,8 @@
-from typing import List, Optional
-from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext
+from typing import List, Optional, Dict, Any
+from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext, ItemState
 from ragtune.core.budget import CostBudget, CostTracker
-from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler
+from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler, BaseEstimator
+from ragtune.core.pool import CandidatePool, PoolItem
 from ragtune.utils.config import config
 
 class RAGtuneController:
@@ -12,6 +13,7 @@ class RAGtuneController:
         reranker: BaseReranker,
         assembler: BaseAssembler,
         scheduler: BaseScheduler,
+        estimator: BaseEstimator,
         budget: Optional[CostBudget] = None
     ):
         self.retriever = retriever
@@ -19,6 +21,7 @@ class RAGtuneController:
         self.reranker = reranker
         self.assembler = assembler
         self.scheduler = scheduler
+        self.estimator = estimator
         self.default_budget = budget or CostBudget()
 
     def run(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
@@ -32,64 +35,74 @@ class RAGtuneController:
         if not queries:
             queries = [query]
         
-        # 2. Retrieval
-        reformulation_results = []
-        # Dynamically determine top_k based on budget and configured multiplier
+        # 2. Retrieval & Pool Initialization
         multiplier = config.get("retrieval.pool_multiplier", 2.0)
         default_top_k = config.get("retrieval.default_top_k", 10)
-        
         max_docs = budget.limits.get("rerank_docs", default_top_k)
         top_k = int(max_docs * multiplier)
         
-        for q in queries:
-            docs = self.retriever.retrieve(context, top_k=top_k)
-            reformulation_results.append(
-                ReformulationResult(original_query=query, reformulated_query=q, candidates=docs)
-            )
+        raw_items = []
+        seen_ids = set()
+        for q_idx, q in enumerate(queries):
+            q_context = context.model_copy(update={"query": q})
+            docs = self.retriever.retrieve(q_context, top_k=top_k)
+            for d_idx, doc in enumerate(docs):
+                if doc.id not in seen_ids:
+                    item = PoolItem(
+                        doc_id=doc.id,
+                        content=doc.content,
+                        metadata=doc.metadata,
+                        sources={f"query_{q_idx}": doc.score},
+                        initial_rank=d_idx
+                    )
+                    raw_items.append(item)
+                    seen_ids.add(doc.id)
+                else:
+                    # Update sources for duplicates
+                    for item in raw_items:
+                        if item.doc_id == doc.id:
+                            item.sources[f"query_{q_idx}"] = doc.score
+                            break
+                            
+        pool = CandidatePool(raw_items)
+        trace.add("controller", "pool_init", count=len(pool))
+
+        # 3. Iterative Loop (RAGtune v0.54 logic)
+        while not tracker.is_exhausted():
+            # A. Valorization (Estimator determines priorities)
+            priorities = self.estimator.value(pool, context)
+            pool.apply_priorities(priorities)
             
-        # 3. Fusion
-        pool = []
-        seen = set()
-        for res in reformulation_results:
-            for doc in res.candidates:
-                if doc.id not in seen:
-                    pool.append(doc)
-                    seen.add(doc.id)
-                    
-        # 4. Iterative Loop
-        processed_indices = []
-        while True:
-            proposal = self.scheduler.propose_next_batch(
-                pool, processed_indices, context
-            )
-            
-            if proposal is None:
+            # B. Scheduling (Policy selects batch)
+            proposal = self.scheduler.select_batch(pool, tracker.remaining_view())
+            if not proposal:
                 break
                 
-            batch_docs = [pool[i] for i in proposal.document_indices]
+            # C. Transition to IN_FLIGHT
+            pool.transition(proposal.doc_ids, ItemState.IN_FLIGHT)
             
-            if tracker.try_consume_rerank(len(batch_docs)):
-                reranked_batch = self.reranker.rerank(batch_docs, context, strategy=proposal.strategy)
+            # D. Execution (Reranker processes batch)
+            try:
+                batch_items = pool.get_items(proposal.doc_ids)
+                results = self.reranker.rerank(batch_items, context, strategy=proposal.strategy)
+                # E. Update scores and move to RERANKED
+                pool.update_scores(results, strategy=proposal.strategy, expected_ids=proposal.doc_ids)
+                tracker.consume(proposal.expected_cost)
                 
-                for idx, new_doc in zip(proposal.document_indices, reranked_batch):
-                    pool[idx] = new_doc
-                    processed_indices.append(idx)
-                    
                 trace.add(
                     "controller", "rerank_batch", 
-                    count=len(batch_docs), 
+                    count=len(proposal.doc_ids), 
                     strategy=proposal.strategy,
-                    doc_ids=[pool[i].id for i in proposal.document_indices],
-                    utility=proposal.estimated_utility
+                    doc_ids=proposal.doc_ids
                 )
-            else:
-                trace.add("controller", "skip_batch", reason="budget_denied")
-                break
+            except Exception as e:
+                trace.add("controller", "rerank_error", error=str(e), doc_ids=proposal.doc_ids)
+                # v0.54 Failure Rule: Drop failed docs
+                pool.transition(proposal.doc_ids, ItemState.DROPPED)
             
-        processed_docs = pool
-            
-        # 5. Assembly
-        final_docs = self.assembler.assemble(processed_docs, context)
+        # 4. Assembly
+        active_items = pool.get_active_items()
+        final_docs = self.assembler.assemble(active_items, context)
         
         return ControllerOutput(
             query=query,
@@ -109,63 +122,72 @@ class RAGtuneController:
         if not queries:
             queries = [query]
         
-        # 2. Retrieval
-        reformulation_results = []
+        # 2. Retrieval & Pool Initialization
         multiplier = config.get("retrieval.pool_multiplier", 2.0)
         default_top_k = config.get("retrieval.default_top_k", 10)
-        
         max_docs = budget.limits.get("rerank_docs", default_top_k)
         top_k = int(max_docs * multiplier)
         
-        for q in queries:
-            docs = await self.retriever.aretrieve(context, top_k=top_k)
-            reformulation_results.append(
-                ReformulationResult(original_query=query, reformulated_query=q, candidates=docs)
-            )
+        raw_items = []
+        seen_ids = set()
+        for q_idx, q in enumerate(queries):
+            q_context = context.model_copy(update={"query": q})
+            docs = await self.retriever.aretrieve(q_context, top_k=top_k)
+            for d_idx, doc in enumerate(docs):
+                if doc.id not in seen_ids:
+                    item = PoolItem(
+                        doc_id=doc.id,
+                        content=doc.content,
+                        metadata=doc.metadata,
+                        sources={f"query_{q_idx}": doc.score},
+                        initial_rank=d_idx
+                    )
+                    raw_items.append(item)
+                    seen_ids.add(doc.id)
+                else:
+                    for item in raw_items:
+                        if item.doc_id == doc.id:
+                            item.sources[f"query_{q_idx}"] = doc.score
+                            break
+                            
+        pool = CandidatePool(raw_items)
+        trace.add("controller", "pool_init", count=len(pool))
+
+        # 3. Iterative Loop
+        while not tracker.is_exhausted():
+            # A. Valorization
+            priorities = self.estimator.value(pool, context)
+            pool.apply_priorities(priorities)
             
-        # 3. Fusion
-        pool = []
-        seen = set()
-        for res in reformulation_results:
-            for doc in res.candidates:
-                if doc.id not in seen:
-                    pool.append(doc)
-                    seen.add(doc.id)
-                    
-        # 4. Iterative Loop
-        processed_indices = []
-        while True:
-            proposal = await self.scheduler.apropose_next_batch(
-                pool, processed_indices, context
-            )
-            
-            if proposal is None:
+            # B. Scheduling
+            proposal = await self.scheduler.aselect_batch(pool, tracker.remaining_view())
+            if not proposal:
                 break
                 
-            batch_docs = [pool[i] for i in proposal.document_indices]
+            # C. Transition to IN_FLIGHT
+            pool.transition(proposal.doc_ids, ItemState.IN_FLIGHT)
             
-            if tracker.try_consume_rerank(len(batch_docs)):
-                reranked_batch = await self.reranker.arerank(batch_docs, context, strategy=proposal.strategy)
+            # D. Execution
+            try:
+                batch_items = pool.get_items(proposal.doc_ids)
+                results = await self.reranker.arerank(batch_items, context, strategy=proposal.strategy)
+                # E. Update scores and move to RERANKED
+                pool.update_scores(results, strategy=proposal.strategy, expected_ids=proposal.doc_ids)
+                tracker.consume(proposal.expected_cost)
                 
-                for idx, new_doc in zip(proposal.document_indices, reranked_batch):
-                    pool[idx] = new_doc
-                    processed_indices.append(idx)
-                    
                 trace.add(
                     "controller", "rerank_batch", 
-                    count=len(batch_docs), 
+                    count=len(proposal.doc_ids), 
                     strategy=proposal.strategy,
-                    doc_ids=[pool[i].id for i in proposal.document_indices],
-                    utility=proposal.estimated_utility
+                    doc_ids=proposal.doc_ids
                 )
-            else:
-                trace.add("controller", "skip_batch", reason="budget_denied")
-                break
+            except Exception as e:
+                trace.add("controller", "rerank_error", error=str(e), doc_ids=proposal.doc_ids)
+                pool.transition(proposal.doc_ids, ItemState.DROPPED)
             
-        processed_docs = pool
-            
-        # 5. Assembly
-        final_docs = await self.assembler.aassemble(processed_docs, context)
+        # 4. Assembly
+        active_items = pool.get_active_items()
+        final_docs = await self.assembler.aassemble(active_items, context)
         
         return ControllerOutput(
             query=query,
