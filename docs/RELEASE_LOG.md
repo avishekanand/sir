@@ -8,7 +8,7 @@
 - **Iterative Loop Orchestration**: `RAGtuneController` now manages the loop with formal state guards and robust exception recovery (automatic dropping of failed docs).
 - **Comprehensive Test Suite**: 44 passing unit and integration tests covering the entire core engine and component contracts.
 - **Repaired Examples**: Full audit and repair of all 10 demo scripts to match the Core 0.54 signatures.
-- **Scoring Precedence**: Formalized scoring hierarchy (Reranker > Estimator > Retrieval) with explicit **Reranked-First** partitioning in the `Assembler` for clean results ranking.
+- **Scoring Precedence**: Formalized scoring hierarchy (Reranker > Estimator > Retrieval) for the final ranked list.
 
 ---
 
