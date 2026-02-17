@@ -17,7 +17,8 @@ from ragtune.components.rerankers import (
     MultiStrategyReranker, 
     LLMReranker, 
     CrossEncoderReranker, 
-    NoOpReranker
+    NoOpReranker,
+    SimulatedReranker
 )
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler

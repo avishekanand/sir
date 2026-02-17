@@ -60,7 +60,6 @@ def run_real_retriever_demo():
     # 4. Configure RAGtune Loop
     # We'll use the ActiveLearningScheduler for batch-by-batch processing
     scheduler = ActiveLearningScheduler(batch_size=2)
-    budget = CostBudget(max_tokens=30, max_reranker_docs=4)
 
     controller = RAGtuneController(
         retriever=retriever,

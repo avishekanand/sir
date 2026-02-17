@@ -34,14 +34,6 @@ def run_scheduler_demo():
     # Using ActiveLearningScheduler as the new standard
     scheduler = ActiveLearningScheduler(batch_size=2)
     
-    # 3. Setup budget (Allow enough for multiple rerank rounds)
-    budget = CostBudget(
-        max_tokens=50, 
-        max_reranker_docs=10, 
-        max_reformulations=1, 
-        max_latency_ms=2000.0
-    )
-    
     # 4. Initialize Controller
     controller = RAGtuneController(
         retriever=retriever,
@@ -55,7 +47,7 @@ def run_scheduler_demo():
     
     # 5. Run pipeline
     query = "reranking"
-    print(f"Running query: '{query}' with budget: {budget.model_dump()}")
+    print(f"Running query: '{query}' with budget: {controller.budget.model_dump()}")
     
     output = controller.run(query)
     

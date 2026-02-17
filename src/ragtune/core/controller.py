@@ -22,10 +22,10 @@ class RAGtuneController:
         self.assembler = assembler
         self.scheduler = scheduler
         self.estimator = estimator
-        self.default_budget = budget or CostBudget()
+        self.budget = budget or CostBudget()
 
     def run(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
-        budget = override_budget or self.default_budget
+        budget = override_budget or self.budget
         trace = ControllerTrace()
         tracker = CostTracker(budget, trace)
         context = RAGtuneContext(query=query, tracker=tracker)
@@ -112,7 +112,7 @@ class RAGtuneController:
         )
 
     async def arun(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
-        budget = override_budget or self.default_budget
+        budget = override_budget or self.budget
         trace = ControllerTrace()
         tracker = CostTracker(budget, trace)
         context = RAGtuneContext(query=query, tracker=tracker)
