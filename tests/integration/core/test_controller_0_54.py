@@ -44,9 +44,9 @@ def test_controller_iterative_loop():
     assert "d1" in doc_ids 
     assert "d3" in doc_ids # Both d1 and d3 matched and were reranked to 1000.95
     
-    assert output.documents[0].score == 1000.95
-    assert output.documents[1].score == 1000.95
-    assert output.documents[2].score == 1000.3 # d2 also reranked (1000.3)
+    assert output.documents[0].score == 0.95
+    assert output.documents[1].score == 0.95
+    assert output.documents[2].score == 0.3 # d2 also reranked (0.3)
     
     # Check trace
     rerank_events = [e for e in output.trace.events if e.action == "rerank_batch"]

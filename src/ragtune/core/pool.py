@@ -21,12 +21,9 @@ class PoolItem(BaseModel):
     def final_score(self) -> float:
         """
         Precedence: Reranker > Estimator > Retrieval Baseline.
-        We add an offset to reranked docs to ensure they take precedence over
-        un-reranked candidates in the final assembly, unless the assembler 
-        explicitly handles normalization.
         """
         if self.reranker_score is not None:
-            return 1000.0 + self.reranker_score
+            return self.reranker_score
         if self.priority_value > 0:
             return self.priority_value
         return max(self.sources.values()) if self.sources else 0.0

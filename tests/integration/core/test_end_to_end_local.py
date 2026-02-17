@@ -45,7 +45,7 @@ def test_i1_rerank_improves_ordering():
     doc_ids = [d.id for d in output.documents[:2]]
     assert "d2" in doc_ids
     assert "d4" in doc_ids
-    assert output.documents[0].score == 1000.95
+    assert output.documents[0].score == 0.95
 
 def test_i2_budget_tradeoff():
     # Scenario A: No reranking budget

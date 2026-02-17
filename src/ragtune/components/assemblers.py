@@ -11,9 +11,16 @@ class GreedyAssembler(BaseAssembler):
     fitting as many as the token budget allows.
     """
     def assemble(self, candidates: List[PoolItem], context: RAGtuneContext) -> List[ScoredDocument]:
-        # Sort candidates by final_score descending
-        # Stable tie-break by initial_rank
-        sorted_candidates = sorted(candidates, key=lambda x: (-x.final_score(), x.initial_rank))
+        # Partition into reranked and non-reranked (candidates)
+        reranked = [it for it in candidates if it.reranker_score is not None]
+        non_reranked = [it for it in candidates if it.reranker_score is None]
+        
+        # Sort each partition
+        reranked.sort(key=lambda x: (-x.reranker_score, x.initial_rank))
+        non_reranked.sort(key=lambda x: (-x.final_score(), x.initial_rank))
+        
+        # Concatenate: Reranked always wins
+        sorted_candidates = reranked + non_reranked
         
         result = []
         for it in sorted_candidates:
