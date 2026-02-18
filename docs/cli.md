@@ -87,6 +87,17 @@ Lists all registered components available in your current environment. Use this 
 - Feedbacks
 - Indexers
 
+### `ragtune visualize`
+Renders an ASCII flow diagram of your pipeline configuration.
+
+- **Options**:
+  - `--edit, -e`: Enter interactive editing mode to modify components and parameters.
+  - `--output, -o`: Save changes to a specific file (if editing).
+
+**Example**:
+```bash
+ragtune visualize my_pipeline.yaml --edit
+```
 ---
 
 ## 📂 Configuration (v0.2)

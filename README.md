@@ -79,7 +79,7 @@ RAGtune is built on a declarative philosophy. Every pipeline, from simple BM25 t
 ### Declarative Pipelines (YAML/JSON)
 Whether you prefer the readability of **YAML** or the machine-compatibility of **JSON**, RAGtune supports both.
 
-````carousel
+**YAML Configuration:**
 ```yaml
 # ragtune_config.yaml
 pipeline:
@@ -88,7 +88,8 @@ pipeline:
   components:
     retriever: { type: "bm25" }
 ```
-<!-- slide -->
+
+**JSON Configuration:**
 ```json
 {
   "pipeline": {
@@ -100,9 +101,14 @@ pipeline:
   }
 }
 ```
-````
 
-For a full breakdown of all commands (`init`, `index`, `validate`, `run`, `list`) and the v0.2 configuration schema, see the **[CLI Reference Guide](docs/cli.md)**.
+### Visual Inspection
+Understand your pipeline flow instantly with ASCII diagrams:
+```bash
+ragtune visualize ragtune_config.yaml
+```
+
+For a full breakdown of all commands (`init`, `index`, `validate`, `run`, `list`, `visualize`) and the v0.2 configuration schema, see the **[CLI Reference Guide](docs/cli.md)**.
 
 ---
 
