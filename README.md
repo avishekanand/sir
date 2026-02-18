@@ -107,6 +107,27 @@ Understand your pipeline flow instantly with ASCII diagrams:
 ```bash
 ragtune visualize ragtune_config.yaml
 ```
+The visualization renders a box-and-arrow diagram representing the pipeline:
+
+```
+╭─────────────────── RAGtune Pipeline: My Pipeline ────────────────────╮
+│                                                                      │
+│  ┌────────────┐    ┌────────────┐    ┌────────────┐    ┌────────────┐│
+│  │ RETRIEVER  │───▶│REFORMULATOR│───▶│  RERANKER  │───▶│ ASSEMBLER  ││
+│  ├────────────┤    ├────────────┤    ├────────────┤    ├────────────┤│
+│  │ type: bm25 │    │ type: llm  │    │ type: cross│    │ type: greed││
+│  └────────────┘    └────────────┘    └────────────┘    └────────────┘│
+│                                              ▲                       │
+│                    ┌────────────┐    ┌───────┴────┐                  │
+│                    │ SCHEDULER  │◀───│  ESTIMATOR │                  │
+│                    ├────────────┤    ├────────────┤                  │
+│                    │ graceful   │    │ type: base │                  │
+│                    └────────────┘    └────────────┘                  │
+│                                                                      │
+│  Budget: tokens=5000 | rerank_docs=50 | latency_ms=2000              │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
 
 For a full breakdown of all commands (`init`, `index`, `validate`, `run`, `list`, `visualize`) and the v0.2 configuration schema, see the **[CLI Reference Guide](docs/cli.md)**.
 
