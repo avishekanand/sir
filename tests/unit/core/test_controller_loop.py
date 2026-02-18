@@ -2,7 +2,7 @@ import pytest
 from typing import List, Dict, Optional
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.pool import CandidatePool, PoolItem, ItemState
-from ragtune.core.types import ScoredDocument, RAGtuneContext, BatchProposal, CostObject, RemainingBudgetView, ControllerTrace
+from ragtune.core.types import ScoredDocument, RAGtuneContext, BatchProposal, CostObject, RemainingBudgetView, ControllerTrace, EstimatorOutput
 from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseScheduler, BaseEstimator, BaseAssembler
 from ragtune.core.budget import CostBudget, CostTracker
 from ragtune.components.assemblers import GreedyAssembler
@@ -18,8 +18,9 @@ class FakeReformulator(BaseReformulator):
         return [context.query]
 
 class FakeEstimator(BaseEstimator):
-    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, float]:
-        return {it.doc_id: 0.5 for it in pool.get_eligible()}
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, EstimatorOutput]:
+        from ragtune.core.types import EstimatorOutput
+        return {it.doc_id: EstimatorOutput(priority=0.5) for it in pool.get_eligible()}
 
 class FakeScheduler(BaseScheduler):
     def __init__(self, batch_size=2):

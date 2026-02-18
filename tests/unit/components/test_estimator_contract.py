@@ -1,21 +1,22 @@
 import pytest
 from ragtune.core.pool import CandidatePool, PoolItem, ItemState
-from ragtune.core.types import RAGtuneContext
+from ragtune.core.types import RAGtuneContext, EstimatorOutput
 from ragtune.core.interfaces import BaseEstimator
 from typing import Dict
 
 class FakeEstimator(BaseEstimator):
-    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, float]:
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, EstimatorOutput]:
+        from ragtune.core.types import EstimatorOutput
         # Simple metadata overlap boost (like UtilityEstimator but fixed)
         eligible = pool.get_eligible()
         active = pool.get_active_items()
         winners = [it for it in active if it.state == ItemState.RERANKED and it.metadata.get("tag") == "win"]
         
-        priorities = {it.doc_id: 0.5 for it in eligible}
+        priorities = {it.doc_id: EstimatorOutput(priority=0.5) for it in eligible}
         for it in eligible:
             for w in winners:
                 if it.metadata.get("tag") == w.metadata.get("tag"):
-                    priorities[it.doc_id] += 0.4
+                    priorities[it.doc_id].priority += 0.4
         return priorities
 
 def test_b9_eligible_only_impact():
@@ -29,7 +30,8 @@ def test_b9_eligible_only_impact():
     est = FakeEstimator()
     
     vals = est.value(pool, ctx)
-    pool.apply_priorities(vals)
+    priorities = {k: v.priority for k, v in vals.items()}
+    pool.apply_priorities(priorities)
     
     assert items[0].priority_value == 0.5
     assert items[1].priority_value == 0.0 # Untouched
@@ -55,9 +57,9 @@ def test_b11_estimator_uses_reranked_evidence():
     ctx = RAGtuneContext(query="test", tracker=None)
     est = FakeEstimator()
     
-    priorities = est.value(pool, ctx)
-    assert priorities["cand1"] == 0.9 # 0.5 + 0.4
-    assert priorities["cand2"] == 0.5
+    vals = est.value(pool, ctx)
+    assert vals["cand1"].priority == 0.9 # 0.5 + 0.4
+    assert vals["cand2"].priority == 0.5
 
 def test_b12_estimator_no_mutation():
     items = [PoolItem(doc_id="d1", content="c1")]

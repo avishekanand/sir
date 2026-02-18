@@ -10,10 +10,14 @@ class GreedyAssembler(BaseAssembler):
     Greedy assembler that selects documents based on score, 
     fitting as many as the token budget allows.
     """
+    def __init__(self, min_score: float = 0.0, max_docs: int = 10):
+        self.min_score = min_score
+        self.max_docs = max_docs
+
     def assemble(self, candidates: List[PoolItem], context: RAGtuneContext) -> List[ScoredDocument]:
         # Partition into reranked and non-reranked (candidates)
-        reranked = [it for it in candidates if it.reranker_score is not None]
-        non_reranked = [it for it in candidates if it.reranker_score is None]
+        reranked = [it for it in candidates if it.reranker_score is not None and it.final_score() >= self.min_score]
+        non_reranked = [it for it in candidates if it.reranker_score is None and it.final_score() >= self.min_score]
         
         # Sort each partition
         reranked.sort(key=lambda x: (-x.reranker_score, x.initial_rank))
@@ -24,6 +28,9 @@ class GreedyAssembler(BaseAssembler):
         
         result = []
         for it in sorted_candidates:
+            if len(result) >= self.max_docs:
+                break
+                
             # Conversion to output format
             doc = ScoredDocument(
                 id=it.doc_id,

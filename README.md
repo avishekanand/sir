@@ -41,9 +41,7 @@ pip install -e .
 
 ---
 
-## ⚡ Quick Start
-
-The fastest way to use RAGtune is via the CLI (New in **v0.5**).
+The fastest way to use RAGtune is via the CLI using declarative **YAML** or **JSON** configurations.
 
 ### 1. Initialize a Project
 Scaffold a new configuration file with default settings.
@@ -71,6 +69,40 @@ Execute the pipeline instantly from the terminal.
 ```bash
 ragtune run ragtune_config.yaml --query "How does Active Learning optimize RAG?"
 ```
+
+---
+
+## 🛠️ CLI & Configuration
+
+RAGtune is built on a declarative philosophy. Every pipeline, from simple BM25 to complex iterative estimators, can be described in a single file.
+
+### Declarative Pipelines (YAML/JSON)
+Whether you prefer the readability of **YAML** or the machine-compatibility of **JSON**, RAGtune supports both.
+
+````carousel
+```yaml
+# ragtune_config.yaml
+pipeline:
+  name: "My Pipeline"
+  budget: { tokens: 2000 }
+  components:
+    retriever: { type: "bm25" }
+```
+<!-- slide -->
+```json
+{
+  "pipeline": {
+    "name": "My Pipeline",
+    "budget": { "tokens": 2000 },
+    "components": {
+      "retriever": { "type": "bm25" }
+    }
+  }
+}
+```
+````
+
+For a full breakdown of all commands (`init`, `index`, `validate`, `run`, `list`) and the v0.2 configuration schema, see the **[CLI Reference Guide](docs/cli.md)**.
 
 ---
 

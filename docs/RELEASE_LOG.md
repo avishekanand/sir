@@ -1,5 +1,26 @@
 ---
 
+## v0.57 - Visualization & Interactive Editing 🎨
+*Focus: Traceability, Visual Comprehension, and Rapid Iteration.*
+
+- **Pipeline Visualization**: ASCII-based flow diagrams for declarative configurations via `ragtune visualize`.
+- **Interactive Editor**: CLI-based guided editing of components, parameters, and budgets with real-time diff preview.
+- **Improved Feedback Loop**: Enhanced traceability for scheduler decisions in the iterative loop.
+
+---
+
+## v0.56 - Declarative Lifecycle & CLI Failsafes 🛡️
+*Focus: Production Hardening, Lifecycle CLI, and Standardized Estimator Interfaces.*
+
+- **Standardized Estimator Output**: All estimators now return `EstimatorOutput` (priority, predicted_quality, predicted_latency), enabling uniform processing in the controller.
+- **CompositeEstimator**: Added support for weighted ensembles of multiple estimators.
+- **CLI Lifecycle v0.2**: Formalized the `init -> index -> validate -> run` flow with the v0.2 configuration schema.
+- **CLI Failsafes & Overrides**: Protection against accidental config overwrites and runtime overrides for data paths and budget limits.
+- **Adapter Hardening**: Significant stability updates to the PyTerrier adapter, including absolute path resolution and modern `pt.terrier.Retriever` support.
+- **100% Test Compliance**: Full sweep of 80 tests verified.
+
+---
+
 ## v0.54 - Stateful Iterative Reranking (Core v0.5) 💎
 *Focus: State Machine Enforcement, Robust Budgeting, and Testing.*
 

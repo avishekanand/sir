@@ -10,6 +10,12 @@ class ItemState(str, Enum):
     RERANKED = "reranked"    # Final reranker_score available
     DROPPED = "dropped"      # Excluded from final results
 
+class EstimatorOutput(BaseModel):
+    priority: float
+    predicted_quality: Optional[float] = None
+    predicted_latency: Optional[float] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
 class RerankStrategy(str, Enum):
     CROSS_ENCODER = "cross_encoder"
     LLM = "llm"

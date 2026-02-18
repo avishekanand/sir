@@ -1,7 +1,7 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext, ItemState
 from ragtune.core.budget import CostBudget, CostTracker
-from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler, BaseEstimator
+from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler, BaseEstimator, BaseFeedback
 from ragtune.core.pool import CandidatePool, PoolItem
 from ragtune.utils.config import config
 
@@ -14,7 +14,8 @@ class RAGtuneController:
         assembler: BaseAssembler,
         scheduler: BaseScheduler,
         estimator: BaseEstimator,
-        budget: Optional[CostBudget] = None
+        budget: Optional[CostBudget] = None,
+        feedback: Optional[BaseFeedback] = None
     ):
         self.retriever = retriever
         self.reformulator = reformulator
@@ -23,6 +24,7 @@ class RAGtuneController:
         self.scheduler = scheduler
         self.estimator = estimator
         self.budget = budget or CostBudget()
+        self.feedback = feedback
         self._reformulation_cache: Dict[str, List[str]] = {}
 
     def run(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
@@ -77,23 +79,31 @@ class RAGtuneController:
 
         # 3. Iterative Loop (RAGtune v0.54 logic)
         while not tracker.is_exhausted():
-            # A. Valorization (Estimator determines priorities)
-            priorities = self.estimator.value(pool, context)
+            # A. Feedback/Stop Check
+            if self.feedback:
+                should_stop, reason = self.feedback.should_stop(pool.get_metrics(), tracker.remaining_view(), {})
+                if should_stop:
+                    trace.add("controller", "feedback_stop", reason=reason)
+                    break
+
+            # B. Valorization (Estimator determines priorities)
+            est_outputs = self.estimator.value(pool, context)
+            priorities = {k: v.priority for k, v in est_outputs.items()}
             pool.apply_priorities(priorities)
             
-            # B. Scheduling (Policy selects batch)
+            # C. Scheduling (Policy selects batch)
             proposal = self.scheduler.select_batch(pool, tracker.remaining_view())
             if not proposal:
                 break
                 
-            # C. Transition to IN_FLIGHT
+            # D. Transition to IN_FLIGHT
             pool.transition(proposal.doc_ids, ItemState.IN_FLIGHT)
             
-            # D. Execution (Reranker processes batch)
+            # E. Execution (Reranker processes batch)
             try:
                 batch_items = pool.get_items(proposal.doc_ids)
                 results = self.reranker.rerank(batch_items, context, strategy=proposal.strategy)
-                # E. Update scores and move to RERANKED
+                # F. Update scores and move to RERANKED
                 pool.update_scores(results, strategy=proposal.strategy, expected_ids=proposal.doc_ids)
                 tracker.consume(proposal.expected_cost)
                 
@@ -105,7 +115,6 @@ class RAGtuneController:
                 )
             except Exception as e:
                 trace.add("controller", "rerank_error", error=str(e), doc_ids=proposal.doc_ids)
-                # v0.54 Failure Rule: Drop failed docs
                 pool.transition(proposal.doc_ids, ItemState.DROPPED)
             
         # 4. Assembly
@@ -171,23 +180,31 @@ class RAGtuneController:
 
         # 3. Iterative Loop
         while not tracker.is_exhausted():
-            # A. Valorization
-            priorities = self.estimator.value(pool, context)
+            # A. Feedback/Stop Check
+            if self.feedback:
+                should_stop, reason = self.feedback.should_stop(pool.get_metrics(), tracker.remaining_view(), {})
+                if should_stop:
+                    trace.add("controller", "feedback_stop", reason=reason)
+                    break
+
+            # B. Valorization
+            est_outputs = self.estimator.value(pool, context)
+            priorities = {k: v.priority for k, v in est_outputs.items()}
             pool.apply_priorities(priorities)
             
-            # B. Scheduling
+            # C. Scheduling
             proposal = await self.scheduler.aselect_batch(pool, tracker.remaining_view())
             if not proposal:
                 break
                 
-            # C. Transition to IN_FLIGHT
+            # D. Transition to IN_FLIGHT
             pool.transition(proposal.doc_ids, ItemState.IN_FLIGHT)
             
-            # D. Execution
+            # E. Execution
             try:
                 batch_items = pool.get_items(proposal.doc_ids)
                 results = await self.reranker.arerank(batch_items, context, strategy=proposal.strategy)
-                # E. Update scores and move to RERANKED
+                # F. Update scores and move to RERANKED
                 pool.update_scores(results, strategy=proposal.strategy, expected_ids=proposal.doc_ids)
                 tracker.consume(proposal.expected_cost)
                 

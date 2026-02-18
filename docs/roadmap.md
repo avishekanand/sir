@@ -6,7 +6,7 @@ This document acts as the single source of truth for the project.
 
 # RAGtune: Project Master Plan
 
-**Version:** 2.2 (Developer Experience & Vision)
+**Version:** 2.3 (Production Hardening & CLI Lifecycle)
 **Mission:** To build a **cost-aware, iterative retrieval controller** that optimizes information gain under strict budget constraints.
 
 ---

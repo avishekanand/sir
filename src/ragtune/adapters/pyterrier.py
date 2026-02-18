@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 from typing import List, Any, Optional
 from ragtune.core.interfaces import BaseRetriever
@@ -16,12 +17,33 @@ class PyTerrierRetriever(BaseRetriever):
     """
     Adapter for PyTerrier transformers (indices) to work as RAGtune retrievers.
     """
-    def __init__(self, pt_transformer: Any):
+    def __init__(self, pt_transformer: Any = None, index_path: Optional[str] = None):
         """
         Args:
             pt_transformer: A PyTerrier transformer (e.g., pt.BatchRetrieve)
+            index_path: Path to a PyTerrier index (used if pt_transformer is None)
         """
-        self.pt_transformer = pt_transformer
+        if pt_transformer is not None:
+            self.pt_transformer = pt_transformer
+        elif index_path is not None:
+            if pt is None:
+                raise ImportError("PyTerrier not installed but index_path provided.")
+            
+            abs_path = os.path.abspath(index_path)
+            # If it's a directory, look for data.properties
+            if os.path.isdir(abs_path):
+                props_path = os.path.join(abs_path, "data.properties")
+                if os.path.exists(props_path):
+                    abs_path = props_path
+
+            # Use the more modern and reliable Retriever loader
+            try:
+                self.pt_transformer = pt.terrier.Retriever(abs_path, wmodel="BM25")
+            except Exception:
+                # Fallback to BatchRetrieve
+                self.pt_transformer = pt.BatchRetrieve(abs_path, wmodel="BM25")
+        else:
+            raise ValueError("Either pt_transformer or index_path must be provided.")
 
     def retrieve(self, context: RAGtuneContext, top_k: int = 10) -> List[ScoredDocument]:
         """

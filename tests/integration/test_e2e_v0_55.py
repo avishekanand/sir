@@ -42,7 +42,8 @@ class MockEstimator(BaseEstimator):
         self.call_count = 0
 
     def value(self, pool, context):
-        return {it.doc_id: 1.0 for it in pool}
+        from ragtune.core.types import EstimatorOutput
+        return {it.doc_id: EstimatorOutput(priority=1.0) for it in pool}
 
     def needs_reformulation(self, context, current_pool):
         self.call_count += 1

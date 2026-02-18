@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict
-from ragtune.core.types import ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext, RemainingBudgetView
+from typing import List, Optional, Dict, Any, Tuple
+from ragtune.core.types import ScoredDocument, ReformulationResult, BatchProposal, RAGtuneContext, RemainingBudgetView, EstimatorOutput
 from ragtune.core.pool import CandidatePool, PoolItem
 
 class BaseRetriever(ABC):
@@ -38,8 +38,8 @@ class BaseAssembler(ABC):
 
 class BaseEstimator(ABC):
     @abstractmethod
-    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, float]:
-        """Calculates priority_value for all eligible items."""
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, EstimatorOutput]:
+        """Calculates priority and other metrics for all eligible items."""
         pass
 
     def needs_reformulation(self, context: RAGtuneContext, current_pool: CandidatePool) -> bool:
@@ -61,3 +61,19 @@ class BaseScheduler(ABC):
         budget: RemainingBudgetView
     ) -> Optional[BatchProposal]:
         return self.select_batch(pool, budget)
+
+class BaseIndexer(ABC):
+    """Base interface for indexing frameworks."""
+    @abstractmethod
+    def build(self, collection_path: str, format: str, fields: Dict[str, str], **params) -> bool:
+        pass
+
+    @abstractmethod
+    def exists(self, index_path: str) -> bool:
+        pass
+
+class BaseFeedback(ABC):
+    """Base interface for feedback/stop policies."""
+    @abstractmethod
+    def should_stop(self, state: Dict[str, Any], budget: Any, estimates: Dict[str, float]) -> Tuple[bool, str]:
+        pass

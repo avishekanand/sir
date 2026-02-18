@@ -9,6 +9,8 @@ class Registry:
         self._assemblers: Dict[str, Any] = {}
         self._schedulers: Dict[str, Any] = {}
         self._estimators: Dict[str, Any] = {}
+        self._indexers: Dict[str, Any] = {}
+        self._feedback: Dict[str, Any] = {}
 
     def reranker(self, name: str):
         def wrapper(cls_or_func):
@@ -46,6 +48,18 @@ class Registry:
             return cls_or_func
         return wrapper
 
+    def indexer(self, name: str):
+        def wrapper(cls_or_func):
+            self._indexers[name] = cls_or_func
+            return cls_or_func
+        return wrapper
+
+    def feedback(self, name: str):
+        def wrapper(cls_or_func):
+            self._feedback[name] = cls_or_func
+            return cls_or_func
+        return wrapper
+
     def get_reranker(self, name: str):
         return self._rerankers.get(name)
 
@@ -64,6 +78,12 @@ class Registry:
     def get_estimator(self, name: str):
         return self._estimators.get(name)
 
+    def get_indexer(self, name: str):
+        return self._indexers.get(name)
+
+    def get_feedback(self, name: str):
+        return self._feedback.get(name)
+
     def list_all(self) -> Dict[str, Dict[str, Any]]:
         return {
             "reranker": self._rerankers,
@@ -71,7 +91,9 @@ class Registry:
             "reformulator": self._reformulators,
             "assembler": self._assemblers,
             "scheduler": self._schedulers,
-            "estimator": self._estimators
+            "estimator": self._estimators,
+            "indexer": self._indexers,
+            "feedback": self._feedback
         }
 
 # Global registry instance
