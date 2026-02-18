@@ -3,7 +3,9 @@ import numpy as np
 from ragtune.core.types import RAGtuneContext
 from ragtune.core.interfaces import BaseEstimator
 from ragtune.core.pool import CandidatePool, ItemState
+from ragtune.registry import registry
 
+@registry.estimator("baseline")
 class BaselineEstimator(BaseEstimator):
     """
     Returns the maximum retrieval score across all sources.
@@ -14,6 +16,7 @@ class BaselineEstimator(BaseEstimator):
             priorities[item.doc_id] = max(item.sources.values()) if item.sources else 0.0
         return priorities
 
+@registry.estimator("utility")
 class UtilityEstimator(BaseEstimator):
     """
     Predicts utility based on simple metadata overlap with already reranked winners.
@@ -38,6 +41,7 @@ class UtilityEstimator(BaseEstimator):
                                 break
         return priorities
 
+@registry.estimator("similarity")
 class SimilarityEstimator(BaseEstimator):
     """
     Intelligence: Predicts utility using semantic similarity (Embeddings).

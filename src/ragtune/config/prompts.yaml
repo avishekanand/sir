@@ -18,3 +18,7 @@ reformulation:
   identity:
     system: "You are a helpful search assistant."
     user: "Original Query: {query}\nReturn the same query."
+  
+  llm_rewrite:
+    system: "You are a search expert. Your goal is to rewrite the user's query into different variations to improve retrieval."
+    user: "Original Query: {query}\nGenerate {m} different search queries that cover different aspects or synonyms of the original query. Output as a JSON list of strings only."

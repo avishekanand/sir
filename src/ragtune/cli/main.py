@@ -1,7 +1,7 @@
 import typer
 import yaml
 import os
-from typing import Optional
+from typing import Optional, List
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
@@ -83,7 +83,8 @@ def list_components():
 def run(
     config_path: Path = typer.Argument(..., help="Path to the pipeline configuration file."),
     query: str = typer.Option(..., "--query", "-q", help="The query to run."),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed execution trace.")
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed execution trace."),
+    limits: Optional[List[str]] = typer.Option(None, "--limit", "-l", help="Override budget limits (e.g. --limit tokens=1000). Can be used multiple times.")
 ):
     """
     Run a RAGtune pipeline from a configuration file.
@@ -92,6 +93,16 @@ def run(
         console.print(f"[bold red]Error:[/bold red] Config file {config_path} not found.")
         raise typer.Exit(code=1)
     
+    # Parse limits if provided
+    budget_overrides = {}
+    if limits:
+        for limit_str in limits:
+            try:
+                k, v = limit_str.split("=")
+                budget_overrides[k] = float(v)
+            except ValueError:
+                console.print(f"[bold yellow]Warning:[/bold yellow] Invalid limit format: {limit_str}. Expected KEY=VALUE")
+
     # Force load default components/adapters to ensure registry is populated
     try:
         import ragtune.adapters  # noqa
@@ -107,7 +118,7 @@ def run(
         name = pipeline_conf.get("name", "Unnamed Pipeline")
         console.print(f"[bold green]Running Pipeline:[/bold green] {name}")
         
-        controller = ConfigLoader.create_controller(config_data)
+        controller = ConfigLoader.create_controller(config_data, budget_overrides=budget_overrides)
         
     except Exception as e:
          console.print(f"[bold red]Configuration Error:[/bold red] {e}")

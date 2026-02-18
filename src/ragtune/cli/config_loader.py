@@ -4,7 +4,7 @@ from pathlib import Path
 from ragtune.registry import registry
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.budget import CostBudget
-from ragtune.core.interfaces import BaseRetriever, BaseReranker, BaseReformulator, BaseAssembler, BaseScheduler
+from ragtune.core.interfaces import BaseRetriever, BaseReranker, BaseReformulator, BaseAssembler, BaseScheduler, BaseEstimator
 
 class ConfigLoader:
     """
@@ -17,10 +17,13 @@ class ConfigLoader:
             return yaml.safe_load(f)
 
     @classmethod
-    def create_controller(cls, config: Dict[str, Any]) -> RAGtuneController:
+    def create_controller(cls, config: Dict[str, Any], budget_overrides: Optional[Dict[str, float]] = None) -> RAGtuneController:
         pipeline_conf = config.get("pipeline", {})
         components_conf = pipeline_conf.get("components", {})
         budget_conf = pipeline_conf.get("budget", {})
+
+        if budget_overrides:
+            budget_conf.update(budget_overrides)
 
         # Instantiate Budget
         # Handle legacy vs new budget format if needed, but for CLI we prefer the dict format
@@ -42,6 +45,7 @@ class ConfigLoader:
                 "reformulator": registry.get_reformulator,
                 "assembler": registry.get_assembler,
                 "scheduler": registry.get_scheduler,
+                "estimator": registry.get_estimator,
             }
             
             getter = getter_map.get(category)
@@ -59,8 +63,9 @@ class ConfigLoader:
         retriever = create_component("retriever", components_conf.get("retriever", {"type": "noop"}), BaseRetriever)
         reranker = create_component("reranker", components_conf.get("reranker", {"type": "noop"}), BaseReranker)
         reformulator = create_component("reformulator", components_conf.get("reformulator", {"type": "noop"}), BaseReformulator)
-        assembler = create_component("assembler", components_conf.get("assembler", {"type": "default"}), BaseAssembler)
-        scheduler = create_component("scheduler", components_conf.get("scheduler", {"type": "default"}), BaseScheduler)
+        assembler = create_component("assembler", components_conf.get("assembler", {"type": "greedy"}), BaseAssembler)
+        scheduler = create_component("scheduler", components_conf.get("scheduler", {"type": "graceful-degradation"}), BaseScheduler)
+        estimator = create_component("estimator", components_conf.get("estimator", {"type": "baseline"}), BaseEstimator)
 
         return RAGtuneController(
             retriever=retriever,
@@ -68,5 +73,6 @@ class ConfigLoader:
             reranker=reranker,
             assembler=assembler,
             scheduler=scheduler,
+            estimator=estimator,
             budget=budget
         )

@@ -13,6 +13,7 @@ class CostBudget(BaseModel):
         "tokens": 4000,
         "rerank_docs": 50,
         "rerank_calls": 10,
+        "retrieval_calls": 10,
         "reformulations": 1,
         "latency_ms": 2000.0
     })
@@ -114,6 +115,9 @@ class CostTracker:
     # Legacy-style helpers for convenience
     def try_consume_reformulation(self, n=1) -> bool:
         return self.try_consume("reformulations", n)
+
+    def try_consume_retrieval(self, n=1) -> bool:
+        return self.try_consume("retrieval_calls", n)
 
     def try_consume_rerank(self, n_docs: int) -> bool:
         return self.try_consume("rerank_docs", n_docs)

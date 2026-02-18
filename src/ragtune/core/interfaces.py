@@ -42,6 +42,10 @@ class BaseEstimator(ABC):
         """Calculates priority_value for all eligible items."""
         pass
 
+    def needs_reformulation(self, context: RAGtuneContext, current_pool: CandidatePool) -> bool:
+        """Determines if query reformulation is needed based on current results."""
+        return True
+
 class BaseScheduler(ABC):
     @abstractmethod
     def select_batch(

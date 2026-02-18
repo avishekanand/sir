@@ -89,20 +89,25 @@ class OllamaListwiseReranker(BaseReranker):
         if not documents:
             return {}
             
-        import litellm
-        import json
-        
-        prompts = config.get("prompts.reranking.listwise")
-        sys_prompt = prompts.get("system")
-        user_template = prompts.get("user")
-        
-        doc_list = ""
-        for doc in documents:
-            doc_list += f"Document ID: {doc.doc_id}\nContent: {doc.content[:500]}\n---\n"
-            
-        user_prompt = user_template.format(query=context.query, documents=doc_list)
-        
         try:
+            import litellm
+            import json
+            
+            prompts = config.get_prompt("reranking.listwise_ranking")
+            if not prompts:
+                # Fallback to hardcoded defaults or raise error
+                sys_prompt = "You are a helpful assistant that ranks documents by relevance."
+                user_template = "Rank these documents for query '{query}':\n{documents}"
+            else:
+                sys_prompt = prompts.get("system", "You are a helpful assistant that ranks documents by relevance.")
+                user_template = prompts.get("user", "")
+
+            doc_list = ""
+            for doc in documents:
+                doc_list += f"Document ID: {doc.doc_id}\nContent: {doc.content[:500]}\n---\n"
+                
+            user_prompt = user_template.format(query=context.query, documents=doc_list)
+            
             response = litellm.completion(
                 model=self.model_name,
                 api_base=self.api_base,
@@ -118,9 +123,22 @@ class OllamaListwiseReranker(BaseReranker):
                 content = content.split("```json")[1].split("```")[0].strip()
             
             data = json.loads(content)
-            rankings = data if isinstance(data, list) else (data.get("rankings") or data.get("scores") or [])
+            if not data:
+                rankings = []
+            elif isinstance(data, list):
+                rankings = data
+            else:
+                rankings = data.get("rankings") or data.get("scores") or []
             
-            score_map = {str(item.get("doc_id") or item.get("id")): float(item.get("relevance_score", 0.0)) for item in rankings}
+            score_map = {}
+            for item in rankings:
+                if isinstance(item, dict):
+                    doc_id = str(item.get("doc_id") or item.get("id", ""))
+                    if doc_id:
+                        score_map[doc_id] = float(item.get("relevance_score") or item.get("score", 0.0))
+                elif isinstance(item, str):
+                    # Fallback for list of IDs
+                    score_map[item] = 1.0 # Or some default rank-based score
             
             return {doc.doc_id: score_map.get(doc.doc_id, 0.0) for doc in documents}
             

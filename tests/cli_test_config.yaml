@@ -1,0 +1,18 @@
+pipeline:
+  name: "CLI Test Pipeline"
+  components:
+    retriever:
+      type: "in-memory"
+      params:
+        documents: []
+    reranker:
+      type: "simulated"
+    reformulator:
+      type: "identity"
+    assembler:
+      type: "greedy"
+    scheduler:
+      type: "graceful-degradation"
+  budget:
+    tokens: 4000
+    retrieval_calls: 5

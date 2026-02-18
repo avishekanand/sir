@@ -3,6 +3,11 @@
 retrieval:
   pool_multiplier: 2.0
   default_top_k: 10
+  num_reformulations: 2
+  depth_per_reformulation: 5
+  original_query_depth: 10
+  max_pool_size: 50
+  near_duplicate_threshold: 0.8
 
 reranking:
   batch_size: 5

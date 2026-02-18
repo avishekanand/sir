@@ -23,6 +23,7 @@ class RAGtuneController:
         self.scheduler = scheduler
         self.estimator = estimator
         self.budget = budget or CostBudget()
+        self._reformulation_cache: Dict[str, List[str]] = {}
 
     def run(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
         budget = override_budget or self.budget
@@ -30,42 +31,49 @@ class RAGtuneController:
         tracker = CostTracker(budget, trace)
         context = RAGtuneContext(query=query, tracker=tracker)
         
-        # 1. Reformulation
-        queries = self.reformulator.generate(context)
+        # 1. Original Retrieval
+        d_orig = config.get("retrieval.original_query_depth", 10)
+        d_ref = config.get("retrieval.depth_per_reformulation", 5)
+        max_pool = config.get("retrieval.max_pool_size", 50)
+        
+        pool = CandidatePool()
+        if tracker.try_consume_retrieval():
+            docs_orig = self.retriever.retrieve(context, top_k=d_orig)
+            pool.add_items(docs_orig, source="original")
+        
+        # 2. Reformulation Decision (Gated by Estimator)
+        queries = []
+        if self.estimator.needs_reformulation(context, pool):
+            if query in self._reformulation_cache:
+                queries = self._reformulation_cache[query]
+                trace.add("controller", "reformulation_cache_hit", query=query)
+            else:
+                queries = self.reformulator.generate(context)
+                self._reformulation_cache[query] = queries
+                
         if not queries:
-            queries = [query]
+            queries = []
         
-        # 2. Retrieval & Pool Initialization
-        multiplier = config.get("retrieval.pool_multiplier", 2.0)
-        default_top_k = config.get("retrieval.default_top_k", 10)
-        max_docs = budget.limits.get("rerank_docs", default_top_k)
-        top_k = int(max_docs * multiplier)
-        
-        raw_items = []
-        seen_ids = set()
+        # 3. Supplemental Retrieval (with budget check per round)
+        seen_queries = {query.lower().strip()}
         for q_idx, q in enumerate(queries):
+            q_norm = q.lower().strip()
+            if q_norm in seen_queries:
+                continue
+            seen_queries.add(q_norm)
+            
+            if not tracker.try_consume_retrieval():
+                trace.add("controller", "retrieval_skipped", query=q, reason="budget_exhausted")
+                continue
+
             q_context = context.model_copy(update={"query": q})
-            docs = self.retriever.retrieve(q_context, top_k=top_k)
-            for d_idx, doc in enumerate(docs):
-                if doc.id not in seen_ids:
-                    item = PoolItem(
-                        doc_id=doc.id,
-                        content=doc.content,
-                        metadata=doc.metadata,
-                        sources={f"query_{q_idx}": doc.score},
-                        initial_rank=d_idx
-                    )
-                    raw_items.append(item)
-                    seen_ids.add(doc.id)
-                else:
-                    # Update sources for duplicates
-                    for item in raw_items:
-                        if item.doc_id == doc.id:
-                            item.sources[f"query_{q_idx}"] = doc.score
-                            break
-                            
-        pool = CandidatePool(raw_items)
-        trace.add("controller", "pool_init", count=len(pool))
+            docs_ref = self.retriever.retrieve(q_context, top_k=d_ref)
+            pool.add_items(docs_ref, source=f"rewrite_{q_idx}")
+        
+        # Enforce pool cap
+        pool.enforce_cap(max_pool)
+        metrics = pool.get_metrics()
+        trace.add("controller", "pool_init", count=len(pool), reformulations=queries, metrics=metrics)
 
         # 3. Iterative Loop (RAGtune v0.54 logic)
         while not tracker.is_exhausted():
@@ -117,41 +125,49 @@ class RAGtuneController:
         tracker = CostTracker(budget, trace)
         context = RAGtuneContext(query=query, tracker=tracker)
         
-        # 1. Reformulation
-        queries = await self.reformulator.agenerate(context)
+        # 1. Original Retrieval
+        d_orig = config.get("retrieval.original_query_depth", 10)
+        d_ref = config.get("retrieval.depth_per_reformulation", 5)
+        max_pool = config.get("retrieval.max_pool_size", 50)
+        
+        pool = CandidatePool()
+        if tracker.try_consume_retrieval():
+            docs_orig = await self.retriever.aretrieve(context, top_k=d_orig)
+            pool.add_items(docs_orig, source="original")
+        
+        # 2. Reformulation Decision (Gated by Estimator)
+        queries = []
+        if self.estimator.needs_reformulation(context, pool):
+            if query in self._reformulation_cache:
+                queries = self._reformulation_cache[query]
+                trace.add("controller", "reformulation_cache_hit", query=query)
+            else:
+                # agenerate handles its own budget check internally (try_consume_reformulation)
+                queries = await self.reformulator.agenerate(context)
+                self._reformulation_cache[query] = queries
+                
         if not queries:
-            queries = [query]
+            queries = []
         
-        # 2. Retrieval & Pool Initialization
-        multiplier = config.get("retrieval.pool_multiplier", 2.0)
-        default_top_k = config.get("retrieval.default_top_k", 10)
-        max_docs = budget.limits.get("rerank_docs", default_top_k)
-        top_k = int(max_docs * multiplier)
-        
-        raw_items = []
-        seen_ids = set()
+        # 3. Supplemental Retrieval (with budget check per round)
+        seen_queries = {query.lower().strip()}
         for q_idx, q in enumerate(queries):
+            q_norm = q.lower().strip()
+            if q_norm in seen_queries:
+                continue
+            seen_queries.add(q_norm)
+            
+            if not tracker.try_consume_retrieval():
+                trace.add("controller", "retrieval_skipped", query=q, reason="budget_exhausted")
+                continue
+
             q_context = context.model_copy(update={"query": q})
-            docs = await self.retriever.aretrieve(q_context, top_k=top_k)
-            for d_idx, doc in enumerate(docs):
-                if doc.id not in seen_ids:
-                    item = PoolItem(
-                        doc_id=doc.id,
-                        content=doc.content,
-                        metadata=doc.metadata,
-                        sources={f"query_{q_idx}": doc.score},
-                        initial_rank=d_idx
-                    )
-                    raw_items.append(item)
-                    seen_ids.add(doc.id)
-                else:
-                    for item in raw_items:
-                        if item.doc_id == doc.id:
-                            item.sources[f"query_{q_idx}"] = doc.score
-                            break
-                            
-        pool = CandidatePool(raw_items)
-        trace.add("controller", "pool_init", count=len(pool))
+            docs_ref = await self.retriever.aretrieve(q_context, top_k=d_ref)
+            pool.add_items(docs_ref, source=f"rewrite_{q_idx}")
+                             
+        pool.enforce_cap(max_pool)
+        metrics = pool.get_metrics()
+        trace.add("controller", "pool_init", count=len(pool), reformulations=queries, metrics=metrics)
 
         # 3. Iterative Loop
         while not tracker.is_exhausted():
@@ -195,3 +211,4 @@ class RAGtuneController:
             trace=trace,
             final_budget_state=tracker.snapshot()
         )
+
