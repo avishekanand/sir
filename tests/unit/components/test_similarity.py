@@ -41,4 +41,4 @@ def test_similarity_estimator_boosting():
         estimates = estimator.value(pool, context)
         assert "b" in estimates
         # Mock returns identical vectors, so similarity is max
-        assert estimates["b"] > 0.0
+        assert estimates["b"].priority > 0.0

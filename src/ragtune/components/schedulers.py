@@ -1,6 +1,6 @@
 from typing import List, Optional, Union
 from ragtune.core.interfaces import BaseScheduler
-from ragtune.core.types import BatchProposal, RerankStrategy, RemainingBudgetView, CostObject
+from ragtune.core.types import BatchProposal, RemainingBudgetView, CostObject
 from ragtune.core.pool import CandidatePool, ItemState
 from ragtune.registry import registry
 

@@ -16,11 +16,6 @@ class EstimatorOutput(BaseModel):
     predicted_latency: Optional[float] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-class RerankStrategy(str, Enum):
-    CROSS_ENCODER = "cross_encoder"
-    LLM = "llm"
-    IDENTITY = "identity"
-
 class CostObject(BaseModel):
     tokens: int = 0
     docs: int = 0
@@ -30,7 +25,6 @@ class RemainingBudgetView(BaseModel):
     remaining_tokens: int
     remaining_rerank_docs: int
     remaining_rerank_calls: int
-    assembly_token_buffer: int
 
 class ScoredDocument(BaseModel):
     """Atomic unit of content."""
@@ -43,13 +37,6 @@ class ScoredDocument(BaseModel):
     fusion_score: Optional[float] = None
     initial_rank: int = 0
     token_count: int = 0
-
-class ReformulationResult(BaseModel):
-    """Output of one retrieval path."""
-    original_query: str
-    reformulated_query: str
-    strategy: str = "identity"
-    candidates: List[ScoredDocument] = Field(default_factory=list)
 
 class TraceEvent(BaseModel):
     """Log entry for decision debugging."""
@@ -69,7 +56,7 @@ class ControllerTrace(BaseModel):
 class BatchProposal(BaseModel):
     """The Scheduler's command for the next iteration."""
     doc_ids: List[str]            # Doc IDs to process next
-    strategy: RerankStrategy      # Which model to use
+    strategy: str                 # Which model to use (e.g., "cross_encoder", "llm")
     expected_cost: CostObject     # Expected consumption
     estimated_utility: float = 0.0 # Why we chose this batch (for debugging)
 

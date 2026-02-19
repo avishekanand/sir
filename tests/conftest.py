@@ -5,7 +5,7 @@ import os
 # Add src to sys.path for testing
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-from ragtune.core.types import ScoredDocument, RerankStrategy, RAGtuneContext
+from ragtune.core.types import ScoredDocument, RAGtuneContext
 from ragtune.core.budget import CostBudget
 from ragtune.components.retrievers import InMemoryRetriever
 from ragtune.core.interfaces import BaseReranker, BaseReformulator, BaseAssembler, BaseScheduler
@@ -61,7 +61,7 @@ class FakeScheduler(BaseScheduler):
         from ragtune.core.types import BatchProposal
         return BatchProposal(
             document_indices=next_indices,
-            strategy=RerankStrategy.CROSS_ENCODER
+            strategy="cross_encoder"
         )
 
 @pytest.fixture

@@ -54,37 +54,6 @@ class LLMReformulator(BaseReformulator):
         except Exception:
             return []
 
-    async def agenerate(self, context: RAGtuneContext) -> List[str]:
-        if not context.tracker.try_consume_reformulation():
-            return []
-            
-        import litellm
-        
-        m = config.get("retrieval.num_reformulations", 2)
-        max_tokens = config.get("retrieval.max_reformulation_tokens", 1000)
-        prompt_config = config.get_prompt("reformulation.llm_rewrite")
-        
-        system_prompt = prompt_config.get("system")
-        user_prompt = prompt_config.get("user").format(query=context.query, m=m)
-        
-        try:
-            response = await litellm.acompletion(
-                model=self.model,
-                api_base=self.api_base,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
-                max_tokens=max_tokens
-            )
-            
-            content = response.choices[0].message.content
-            queries = self._parse_response(content)
-            return self._filter_queries(queries, context.query, m)
-        except Exception:
-            return []
-
     def _parse_response(self, content: str) -> List[str]:
         import json
         import re

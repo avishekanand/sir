@@ -76,7 +76,6 @@ class CostTracker:
             remaining_tokens=max(0, int(self.budget.limits.get("tokens", 0) - self.consumed.get("tokens", 0))),
             remaining_rerank_docs=max(0, int(self.budget.limits.get("rerank_docs", 0) - self.consumed.get("rerank_docs", 0))),
             remaining_rerank_calls=max(0, int(self.budget.limits.get("rerank_calls", 0) - self.consumed.get("rerank_calls", 0))),
-            assembly_token_buffer=int(config.get("assembly.token_buffer", 500))
         )
 
     def consume(self, cost: CostObject):

@@ -69,9 +69,12 @@ class RAGtuneLangChainAdapter:
         ]
 
     async def ainvoke(self, query: str, **kwargs) -> List[Any]:
+        """Async invoke - wraps sync run() for compatibility."""
+        import asyncio
+        # Run sync method in thread pool to avoid blocking
+        output = await asyncio.to_thread(self.controller.run, query)
+
         from langchain_core.documents import Document
-        output = await self.controller.arun(query)
-        
         return [
             Document(
                 page_content=doc.content,

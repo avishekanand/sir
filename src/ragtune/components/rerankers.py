@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, Any, Union
 from ragtune.core.pool import PoolItem
-from ragtune.core.types import RerankStrategy, RAGtuneContext
+from ragtune.core.types import RAGtuneContext
 from ragtune.core.interfaces import BaseReranker
 from ragtune.registry import registry
 from ragtune.utils.config import config
@@ -154,15 +154,7 @@ class MultiStrategyReranker(BaseReranker):
         self.default_strategy = default_strategy or "identity"
 
     def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
-        if not strategy or strategy not in self.strategies:
-            # Fallback to identity or first available?
-            # Let's use identity if registered, else skip
-            return self.strategies[RerankStrategy.IDENTITY].rerank(documents, context)
-        
-        return self.strategies[strategy].rerank(documents, context)
-
-    async def arerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
-        if not strategy or strategy not in self.strategies:
-            return await self.strategies[RerankStrategy.IDENTITY].arerank(documents, context)
-        
-        return await self.strategies[strategy].arerank(documents, context, strategy=strategy)
+        effective_strategy = strategy if strategy and strategy in self.strategies else self.default_strategy
+        if effective_strategy not in self.strategies:
+            return {doc.doc_id: 0.0 for doc in documents}
+        return self.strategies[effective_strategy].rerank(documents, context)

@@ -107,11 +107,3 @@ def test_llm_reformulator_max_tokens_enforcement(mock_context):
         assert "max_tokens" in kwargs
         assert kwargs["max_tokens"] == 1000
 
-@pytest.mark.asyncio
-async def test_llm_reformulator_agenerate_parsing(mock_context):
-    with patch("litellm.acompletion") as mock_acompletion:
-        mock_acompletion.return_value = MockResponse('["how does RAG work", "explain retrieval augmented generation"]')
-        
-        reformulator = LLMReformulator()
-        results = await reformulator.agenerate(mock_context)
-        assert len(results) == 2

@@ -22,7 +22,7 @@ def test_estimator_boost_by_source():
     # UtilityEstimator uses retrieval score as baseline if no winners.
     # We didn't set sources, so scores are 0.
     estimates = estimator.value(pool, context)
-    assert estimates["a"] == 0.0
+    assert estimates["a"].priority == 0.0
     
     # Simulate doc_a being reranked with high score
     # First move A to IN_FLIGHT then RERANKED
@@ -39,5 +39,5 @@ def test_estimator_boost_by_source():
     pool.get_items(["b", "c"])[1].sources["bm25"] = 0.5
     
     estimates_with_sources = estimator.value(pool, context)
-    assert estimates_with_sources["b"] > 0.5 # Boosted
-    assert estimates_with_sources["c"] == 0.5 # Not boosted
+    assert estimates_with_sources["b"].priority > 0.5  # Boosted
+    assert estimates_with_sources["c"].priority == 0.5  # Not boosted
