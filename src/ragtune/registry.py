@@ -1,5 +1,4 @@
-from typing import Dict, Any, Type, Callable, Optional
-import functools
+from typing import Dict, Any, Optional
 
 class Registry:
     def __init__(self):

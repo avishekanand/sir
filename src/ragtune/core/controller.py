@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, BatchProposal, RAGtuneContext, ItemState
 from ragtune.core.budget import CostBudget, CostTracker
 from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler, BaseEstimator, BaseFeedback

@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Any, Union
+from typing import List, Dict, Optional, Any
 from ragtune.core.pool import PoolItem
 from ragtune.core.types import RAGtuneContext
 from ragtune.core.interfaces import BaseReranker

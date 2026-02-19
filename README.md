@@ -5,7 +5,7 @@
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-orange)]()
 
-**Budget-Aware, Iterative RAG Middleware with Active Learning.**
+**A Budget-Aware RAG Middleware.**
 
 > **RAGtune** transforms static RAG pipelines into dynamic, cost-sensitive feedback loops. It treats **cost** and **latency** as first-class constraints, optimizing information gain by iteratively sampling and reranking documents based on real-time feedback.
 

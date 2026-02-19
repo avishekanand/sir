@@ -14,7 +14,7 @@ class BudgetStopFeedback(BaseFeedback):
         # budget is RemainingBudgetView
         
         # This is a placeholder for more complex logic
-        if budget.tokens < 100:
+        if budget.remaining_tokens < 100:
             return True, "Critical token budget remaining"
             
         return False, ""

@@ -1,6 +1,5 @@
 import typer
 import yaml
-import os
 from typing import Optional, List
 from pathlib import Path
 from rich.console import Console
