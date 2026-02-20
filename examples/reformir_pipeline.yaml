@@ -1,0 +1,44 @@
+pipeline:
+  budget:
+    limits:
+      tokens: 4000
+      rerank_docs: 50
+      rerank_calls: 10
+      reformulations: 1
+      latency_ms: 5000
+
+  components:
+    retriever:
+      type: "in-memory"
+
+    # ReformIR-style reformulator: tries querygym genqr_ensemble, falls back to LLM
+    reformulator:
+      type: "reformir"
+      params:
+        model: "gpt-4o-mini"
+        n_variants: 5
+
+    reranker:
+      type: "cross-encoder"
+
+    # Active learning scheduler escalates to LLM reranker when top candidates are tied
+    scheduler:
+      type: "active-learning"
+      params:
+        batch_size: 5
+        strategy: "cross_encoder"
+
+    # ReformIR estimator: learns source weights from cross-encoder feedback each iteration
+    estimator:
+      type: "reformir"
+      params:
+        min_reranked_for_regression: 3
+
+    assembler:
+      type: "greedy"
+
+    # Stops the loop when learned source weights converge (no more signal to extract)
+    feedback:
+      type: "reformir-convergence"
+      params:
+        convergence_threshold: 0.01

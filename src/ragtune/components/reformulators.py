@@ -97,6 +97,7 @@ class LLMReformulator(BaseReformulator):
             pass
         return []
 
+    # Exposed for subclasses
     def _filter_queries(self, queries: List[str], original_query: str, m: int) -> List[str]:
         from difflib import SequenceMatcher
         
@@ -127,5 +128,79 @@ class LLMReformulator(BaseReformulator):
                 
             if len(filtered) >= m:
                 break
-                
+
         return filtered
+
+
+@registry.reformulator("reformir")
+class ReformIRReformulator(LLMReformulator):
+    """
+    ReformIR-style ensemble reformulator.
+
+    Tries querygym's genqr_ensemble first (the approach used in the ReformIR paper
+    for generating diverse query variants via ensemble methods). Falls back to the
+    LLM rewrite path (LLMReformulator) when querygym is not installed or fails.
+
+    Inherits _parse_response and _filter_queries from LLMReformulator.
+    """
+    def __init__(self, model: str = "gpt-4o-mini", n_variants: int = 5, api_base: Optional[str] = None):
+        super().__init__(model_name=model, api_base=api_base)
+        self.n_variants = n_variants
+
+    def generate(self, context: RAGtuneContext) -> List[str]:
+        if not context.tracker.try_consume_reformulation():
+            return []
+
+        queries = self._try_querygym(context)
+        if not queries:
+            queries = self._try_llm(context)
+        return self._filter_queries(queries, context.query, self.n_variants)
+
+    def _try_querygym(self, context: RAGtuneContext) -> List[str]:
+        try:
+            import querygym as qg
+            llm_config: dict = {"temperature": 0.5, "max_tokens": 256}
+            if self.api_base:
+                llm_config["base_url"] = self.api_base
+                llm_config["api_key"] = "local"
+            reformulator = qg.create_reformulator("genqr_ensemble", model=self.model, llm_config=llm_config)
+            result = reformulator.reformulate(qg.QueryItem("q0", context.query))
+            variant_outputs = result.metadata.get("variant_outputs", {})
+            queries = [
+                v["raw_output"]
+                for v in variant_outputs.values()
+                if isinstance(v, dict) and v.get("raw_output")
+            ]
+            context.tracker.trace.add("reformulator", "reformir_querygym_ok", count=len(queries))
+            return queries
+        except Exception as e:
+            context.tracker.trace.add("reformulator", "reformir_querygym_fallback", reason=str(e))
+            return []
+
+    def _try_llm(self, context: RAGtuneContext) -> List[str]:
+        import litellm
+        m = self.n_variants
+        max_tokens = config.get("retrieval.max_reformulation_tokens", 1000)
+        prompt_config = config.get_prompt("reformulation.llm_rewrite")
+        if not prompt_config:
+            system_prompt = "You are a search expert."
+            user_prompt = f"Rewrite the query '{context.query}' into {m} diverse variations. Return a JSON array of strings."
+        else:
+            system_prompt = prompt_config.get("system", "You are a search expert.")
+            user_prompt = prompt_config.get("user", "").format(query=context.query, m=m)
+        try:
+            response = litellm.completion(
+                model=self.model,
+                api_base=self.api_base,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content
+            return self._parse_response(content)
+        except Exception as e:
+            context.tracker.trace.add("reformulator", "reformir_llm_error", error=str(e), model=self.model)
+            return []

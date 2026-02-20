@@ -77,19 +77,24 @@ class RAGtuneController:
         metrics = pool.get_metrics()
         trace.add("controller", "pool_init", count=len(pool), reformulations=queries, metrics=metrics)
 
-        # 3. Iterative Loop (RAGtune v0.54 logic)
+        # 3. Iterative Loop
         while not tracker.is_exhausted():
-            # A. Feedback/Stop Check
-            if self.feedback:
-                should_stop, reason = self.feedback.should_stop(pool.get_metrics(), tracker.remaining_view(), {})
-                if should_stop:
-                    trace.add("controller", "feedback_stop", reason=reason)
-                    break
-
-            # B. Valorization (Estimator determines priorities)
+            # A. Valorization (Estimator determines priorities)
             est_outputs = self.estimator.value(pool, context)
             priorities = {k: v.priority for k, v in est_outputs.items()}
             pool.apply_priorities(priorities)
+
+            # Aggregate estimator metadata so feedback can read it (e.g. ReformIR learned weights)
+            estimates: Dict[str, Any] = {}
+            for out in est_outputs.values():
+                estimates.update(out.metadata)
+
+            # B. Feedback/Stop Check (runs after estimator so feedback sees current-iteration data)
+            if self.feedback:
+                should_stop, reason = self.feedback.should_stop(pool.get_metrics(), tracker.remaining_view(), estimates)
+                if should_stop:
+                    trace.add("controller", "feedback_stop", reason=reason)
+                    break
             
             # C. Scheduling (Policy selects batch)
             proposal = self.scheduler.select_batch(pool, tracker.remaining_view())

@@ -98,6 +98,64 @@ class SimilarityEstimator(BaseEstimator):
 
         return priorities
 
+@registry.estimator("reformir")
+class ReformIREstimator(BaseEstimator):
+    """
+    Adaptive weight estimator from the ReformIR algorithm.
+
+    After cross-encoder feedback accumulates, learns optimal combination weights
+    for each retrieval source (original query + each reformulation) via constrained
+    linear regression (scipy.optimize.lsq_linear), using cross-encoder scores as
+    the supervision signal. Applies the learned weights to re-prioritize remaining
+    CANDIDATE items each iteration.
+
+    Falls back to max-retrieval-score priority until min_reranked_for_regression
+    items have been scored by the reranker.
+    """
+    def __init__(self, min_reranked_for_regression: int = 3):
+        self.min_reranked_for_regression = min_reranked_for_regression
+        self._learned_weights: Optional[Dict[str, float]] = None
+
+    def value(self, pool: CandidatePool, context: RAGtuneContext) -> Dict[str, EstimatorOutput]:
+        import scipy.optimize
+
+        reranked = [it for it in pool.get_active_items() if it.state == ItemState.RERANKED]
+        eligible = pool.get_eligible()
+
+        if len(reranked) < self.min_reranked_for_regression:
+            # Not enough cross-encoder feedback yet — use raw retrieval score
+            return {
+                it.doc_id: EstimatorOutput(priority=max(it.sources.values()) if it.sources else 0.0)
+                for it in eligible
+            }
+
+        # Build feature matrix: rows = reranked items, cols = retrieval sources
+        all_sources = sorted({k for it in reranked for k in it.sources})
+        X = np.array([[it.sources.get(s, 0.0) for s in all_sources] for it in reranked])
+        y = np.array([it.reranker_score or 0.0 for it in reranked])
+
+        # Constrained least-squares: weights in [0, 1]
+        result = scipy.optimize.lsq_linear(X, y, bounds=(0, 1))
+        self._learned_weights = dict(zip(all_sources, result.x))
+
+        context.tracker.trace.add(
+            "estimator", "reformir_weights_updated",
+            weights=self._learned_weights, n_reranked=len(reranked),
+        )
+
+        # Score remaining candidates using learned weights; store weights in metadata
+        # so the controller can pass them to ReformIRConvergenceFeedback.
+        priorities = {}
+        for it in eligible:
+            score = sum(self._learned_weights.get(s, 0.0) * v for s, v in it.sources.items())
+            priorities[it.doc_id] = EstimatorOutput(
+                priority=score,
+                predicted_quality=score,
+                metadata={"reformir_weights": self._learned_weights},
+            )
+        return priorities
+
+
 @registry.estimator("composite")
 class CompositeEstimator(BaseEstimator):
     """Combines multiple estimators with weighted or logical aggregation."""
