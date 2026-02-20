@@ -51,7 +51,8 @@ class LLMReformulator(BaseReformulator):
             content = response.choices[0].message.content
             queries = self._parse_response(content)
             return self._filter_queries(queries, context.query, m)
-        except Exception:
+        except Exception as e:
+            context.tracker.trace.add("reformulator", "llm_error", error=str(e), model=self.model)
             return []
 
     def _parse_response(self, content: str) -> List[str]:

@@ -30,7 +30,9 @@ class ActiveLearningScheduler(BaseScheduler):
         selected = eligible[:batch_size]
         doc_ids = [it.doc_id for it in selected]
         
-        # Strategy escalation logic (v0.54 simplified)
+        # Strategy escalation: when the top two candidates are nearly tied
+        # (priority gap < 5%), upgrade from cross_encoder to llm to break the
+        # tie with a more expensive but higher-fidelity signal.
         current_strategy = self.strategy
         if len(selected) >= 2:
             gap = selected[0].priority_value - selected[1].priority_value

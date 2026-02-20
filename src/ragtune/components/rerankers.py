@@ -143,7 +143,7 @@ class OllamaListwiseReranker(BaseReranker):
             return {doc.doc_id: score_map.get(doc.doc_id, 0.0) for doc in documents}
             
         except Exception as e:
-            print(f"Ollama Rerank Error: {e}")
+            context.tracker.trace.add("reranker", "ollama_error", error=str(e), model=self.model_name)
             return {doc.doc_id: 0.0 for doc in documents}
 
 @registry.reranker("multi-strategy")

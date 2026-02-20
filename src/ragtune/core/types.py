@@ -72,7 +72,7 @@ class RAGtuneContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     query: str
-    tracker: Any  # CostTracker
+    tracker: Any  # CostTracker — typed Any to avoid circular import (budget.py imports types.py)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class IllegalTransitionError(Exception):

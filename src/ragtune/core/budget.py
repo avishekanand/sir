@@ -24,10 +24,9 @@ class CostBudget(BaseModel):
         if isinstance(data, dict):
             # If 'limits' is not provided but 'max_*' fields are, populate 'limits'
             if "limits" not in data:
-                # Start with default limits or empty? 
-                # To maintain v0.4 behavior, we should probably start with empty and only set what's provided
-                # but if we want to fallback to defaults, we need to be careful.
-                # Actually, if the user explicitly provides ANY limit, we should probably use that.
+                # Legacy max_* fields: map to limits dict. Unspecified keys fall through
+                # to the Field default_factory (all limits). If no legacy keys are present,
+                # data["limits"] is not set and the Field default applies.
                 new_limits = {}
                 if "max_tokens" in data: new_limits["tokens"] = data.pop("max_tokens")
                 if "max_reranker_docs" in data: new_limits["rerank_docs"] = data.pop("max_reranker_docs")
@@ -95,19 +94,22 @@ class CostTracker:
         # 2. Check Capacity
         limit = self.budget.limits.get(cost_type)
         if limit is None:
-            # If no limit is defined, we allow it but don't track it as a hard limit?
-            # Or should we deny it? Let's allow it but warn in trace.
+            # No limit defined: allow unconditionally and track for observability.
             current = self.consumed.get(cost_type, 0.0)
             self.consumed[cost_type] = current + amount
+            self.trace.add("budget", f"consume_{cost_type}_unlimited", count=amount, total=self.consumed[cost_type])
             return True
 
+        # Always accumulate into consumed — even denied attempts count toward the
+        # running total so that is_exhausted() and remaining_view() stay accurate
+        # for budget projection. Returns False when the new total exceeds the limit.
         current = self.consumed.get(cost_type, 0.0)
         self.consumed[cost_type] = current + amount
-        
+
         if self.consumed[cost_type] <= limit:
             self.trace.add("budget", f"consume_{cost_type}", count=amount, total=self.consumed[cost_type])
             return True
-        
+
         self.trace.add("budget", f"over_limit_{cost_type}", count=amount, total=self.consumed[cost_type], limit=limit)
         return False
 
