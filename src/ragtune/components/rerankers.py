@@ -146,6 +146,37 @@ class OllamaListwiseReranker(BaseReranker):
             context.tracker.trace.add("reranker", "ollama_error", error=str(e), model=self.model_name)
             return {doc.doc_id: 0.0 for doc in documents}
 
+@registry.reranker("monot5")
+class MonoT5Reranker(BaseReranker):
+    """
+    Reranker using MonoT5 (castorini/monot5-base-msmarco-100k) via pyterrier_t5.
+    In-domain for MS MARCO-derived benchmarks (TREC-COVID, NFCorpus, SCIFACT, BEIR).
+    Converts PoolItems to a PyTerrier DataFrame, calls MonoT5ReRanker.transform(),
+    and returns {doc_id: score}.
+    """
+    def __init__(self, model_name: str = "castorini/monot5-base-msmarco-100k", batch_size: int = 16):
+        import pyterrier as pt
+        if not pt.started():
+            pt.init()
+        from pyterrier_t5 import MonoT5ReRanker
+        self._reranker = MonoT5ReRanker(model=model_name, batch_size=batch_size)
+
+    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+        import pandas as pd
+        if not documents:
+            return {}
+        df = pd.DataFrame({
+            "qid":   "q0",
+            "query": context.query,
+            "docno": [d.doc_id      for d in documents],
+            "text":  [d.content     for d in documents],
+            "score": [d.final_score() for d in documents],
+            "rank":  range(len(documents)),
+        })
+        result = self._reranker.transform(df)
+        return dict(zip(result["docno"], result["score"]))
+
+
 @registry.reranker("multi-strategy")
 class MultiStrategyReranker(BaseReranker):
     """Router for multiple reranking strategies."""

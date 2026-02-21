@@ -13,7 +13,11 @@ from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.components.estimators import SimilarityEstimator, UtilityEstimator
-from ragtune.utils.console import print_header, print_step, print_success
+from rich.console import Console as _Console
+_console = _Console()
+def print_header(msg): _console.print(f"[bold blue]{msg}[/bold blue]")
+def print_step(msg):   _console.print(f"[dim]{msg}[/dim]")
+def print_success(msg): _console.print(f"[bold green]{msg}[/bold green]")
 from benchmark_utils import get_found_rank, summarize_metrics, calculate_ndcg, calculate_mrr
 
 import pyterrier as pt
