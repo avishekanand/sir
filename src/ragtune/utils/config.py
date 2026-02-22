@@ -36,6 +36,14 @@ class ConfigLoader:
         """Get a prompt from prompts using dot notation"""
         return self._get_recursive(self._prompts, key_path, default)
 
+    def set(self, key_path: str, value: Any) -> None:
+        """Override a config value at runtime using dot notation."""
+        keys = key_path.split(".")
+        d = self._config
+        for k in keys[:-1]:
+            d = d.setdefault(k, {})
+        d[keys[-1]] = value
+
     def _get_recursive(self, data: Dict, key_path: str, default: Any) -> Any:
         keys = key_path.split(".")
         val = data

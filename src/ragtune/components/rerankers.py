@@ -149,12 +149,12 @@ class OllamaListwiseReranker(BaseReranker):
 @registry.reranker("monot5")
 class MonoT5Reranker(BaseReranker):
     """
-    Reranker using MonoT5 (castorini/monot5-base-msmarco-100k) via pyterrier_t5.
+    Reranker using MonoT5 (castorini/monot5-base-msmarco) via pyterrier_t5.
     In-domain for MS MARCO-derived benchmarks (TREC-COVID, NFCorpus, SCIFACT, BEIR).
     Converts PoolItems to a PyTerrier DataFrame, calls MonoT5ReRanker.transform(),
     and returns {doc_id: score}.
     """
-    def __init__(self, model_name: str = "castorini/monot5-base-msmarco-100k", batch_size: int = 16):
+    def __init__(self, model_name: str = "castorini/monot5-base-msmarco", batch_size: int = 16):
         import pyterrier as pt
         if not pt.started():
             pt.init()

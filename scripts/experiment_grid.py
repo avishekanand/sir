@@ -55,6 +55,13 @@ from ragtune.components.estimators import (
 from ragtune.components.feedback import (
     BudgetStopFeedback, ReformIRConvergenceFeedback,
 )
+from ragtune.utils.config import config
+
+# Override retrieval depth so experiments have a meaningful candidate pool.
+# The controller uses these config values; 50 gives a good pool size for
+# benchmarking without being too expensive.
+config.set("retrieval.original_query_depth", 50)
+config.set("retrieval.max_pool_size", 100)
 
 console = Console()
 
@@ -71,9 +78,9 @@ class DatasetConfig:
     graded: bool        # True = graded NDCG, False = binary
 
 DATASETS = [
-    DatasetConfig("trec-covid", "beir/trec-covid",  50_000, 20, graded=True),
-    DatasetConfig("nfcorpus",   "beir/nfcorpus",         0, 50, graded=True),
-    DatasetConfig("scifact",    "beir/scifact",           0, 50, graded=False),
+    DatasetConfig("trec-covid", "beir/trec-covid",       50_000, 20, graded=True),
+    DatasetConfig("nfcorpus",   "beir/nfcorpus/test",         0, 50, graded=True),
+    DatasetConfig("scifact",    "beir/scifact/test",           0, 50, graded=False),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────

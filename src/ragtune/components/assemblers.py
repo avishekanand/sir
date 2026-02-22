@@ -10,7 +10,7 @@ class GreedyAssembler(BaseAssembler):
     Greedy assembler that selects documents based on score, 
     fitting as many as the token budget allows.
     """
-    def __init__(self, min_score: float = 0.0, max_docs: int = 10):
+    def __init__(self, min_score: float = float("-inf"), max_docs: int = 10):
         self.min_score = min_score
         self.max_docs = max_docs
 
