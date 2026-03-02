@@ -2,7 +2,7 @@
 
 
 
-#Architecture
+# Architecture
 
                   +------------------+
                 |      Query q     |
