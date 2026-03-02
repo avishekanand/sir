@@ -89,7 +89,7 @@ where $g(\cdot)$ emphasizes documents near the decision boundary.
 Select a batch:
 
 $$
-B = \operatorname{TopK}(U_i)
+B = TopK(U_i)
 $$
 
 Only $B$ is evaluated by the LLM.
