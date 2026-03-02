@@ -36,9 +36,11 @@ We move from a linear waterfall to a stateful loop.
 * **Scheduling:** The `Scheduler` proposes the next `Batch` of documents to rerank.
 * **Execution:** The `Reranker` scores the batch. Costs are consumed.
 * **Feedback:** New scores update the `Estimator`'s beliefs.
+ 
 
 
 5. **Output:** When budget is exhausted or pool is empty, the `Assembler` selects the final context.
+6. **Generative feedback** Uncertainty based feedback / verifier based from LLM to adjust rankings. Above loop can be adapted to use generative feedback to adjust rankings and reformulations.
 
 ### High-Level Diagram
 
