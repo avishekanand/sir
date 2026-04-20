@@ -109,14 +109,15 @@ class RAGtuneController:
                 batch_items = pool.get_items(proposal.doc_ids)
                 results = self.reranker.rerank(batch_items, context, strategy=proposal.strategy)
                 # F. Update scores and move to RERANKED
-                pool.update_scores(results, strategy=proposal.strategy, expected_ids=proposal.doc_ids)
+                dropped = pool.update_scores(results, strategy=proposal.strategy, expected_ids=proposal.doc_ids)
                 tracker.consume(proposal.expected_cost)
-                
+
                 trace.add(
-                    "controller", "rerank_batch", 
-                    count=len(proposal.doc_ids), 
+                    "controller", "rerank_batch",
+                    count=len(proposal.doc_ids),
                     strategy=proposal.strategy,
-                    doc_ids=proposal.doc_ids
+                    doc_ids=proposal.doc_ids,
+                    dropped_ids=dropped or None,
                 )
             except Exception as e:
                 trace.add("controller", "rerank_error", error=str(e), doc_ids=proposal.doc_ids)

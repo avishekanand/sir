@@ -84,24 +84,27 @@ class CandidatePool:
             
             item.state = target
 
-    def update_scores(self, scores: Dict[str, float], strategy: str, expected_ids: Optional[List[str]] = None):
-        """Updates scores only for docs in IN_FLIGHT, then moves to RERANKED."""
+    def update_scores(self, scores: Dict[str, float], strategy: str, expected_ids: Optional[List[str]] = None) -> List[str]:
+        """Updates scores only for docs in IN_FLIGHT, then moves to RERANKED. Returns dropped doc_ids."""
         for did, score in scores.items():
             item = self._items.get(did)
             if not item:
                 continue
             if item.state != ItemState.IN_FLIGHT:
                 raise IllegalTransitionError(did, str(item.state), "reranked")
-            
+
             item.reranker_score = score
             item.reranker_strategy = strategy
             item.state = ItemState.RERANKED
-            
+
+        dropped = []
         if expected_ids:
             for did in expected_ids:
                 item = self._items.get(did)
                 if item and item.state == ItemState.IN_FLIGHT:
                     item.state = ItemState.DROPPED
+                    dropped.append(did)
+        return dropped
 
     def apply_priorities(self, priorities: Dict[str, float]):
         """Sets priority_value for candidates."""
