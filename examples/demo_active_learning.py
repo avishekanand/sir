@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
-from ragtune.core.types import ScoredDocument, RerankStrategy
+from ragtune.core.types import ScoredDocument
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
 from ragtune.components.retrievers import InMemoryRetriever
