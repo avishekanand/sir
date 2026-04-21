@@ -52,6 +52,33 @@ docs/
 
 ---
 
+## Viewing Tools
+
+**Slides — render to PDF or HTML:**
+```bash
+# PDF (requires marp: npm install -g @marp-team/marp-cli)
+marp presentations/ragtune-feedback-driven-retrieval-group-talk.md --pdf
+
+# HTML (interactive, opens in browser)
+marp presentations/ragtune-feedback-driven-retrieval-group-talk.md --html && open presentations/ragtune-feedback-driven-retrieval-group-talk.html
+```
+
+**Markdown reports — render GitHub-style in browser:**
+```bash
+# requires: pip install grip && pip install "werkzeug<3.0"
+grip experiments-grid.md        # opens at http://localhost:6419
+grip docs/concepts/controller-trace.md
+```
+
+**Markdown reports — render in terminal:**
+```bash
+# requires: brew install glow
+glow experiments-grid.md
+glow concepts/controller-estimator-scheduler.md
+```
+
+---
+
 ## Key Results (Summary)
 
 From the ablation study across NFCorpus, SciFact, and TREC-COVID:
