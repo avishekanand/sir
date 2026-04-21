@@ -77,6 +77,13 @@ glow experiments-grid.md
 glow concepts/controller-estimator-scheduler.md
 ```
 
+**Markdown reports — one-shot HTML (no server, no install beyond stdlib):**
+```bash
+python -m markdown experiments-grid.md > /tmp/exp.html && open /tmp/exp.html
+python -m markdown concepts/controller-trace.md > /tmp/trace.html && open /tmp/trace.html
+# requires: pip install markdown
+```
+
 ---
 
 ## Key Results (Summary)
