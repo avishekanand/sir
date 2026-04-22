@@ -25,7 +25,8 @@ import numpy as np
 import pandas as pd
 import ir_datasets
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
+from enum import Enum
+from typing import Callable, List, Dict, Any, Optional, Tuple
 
 import pyterrier as pt
 if not pt.started():
@@ -69,18 +70,49 @@ console = Console()
 # Dataset configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
+class RAGTaskType(Enum):
+    """What a dataset provides, determining which metrics are meaningful."""
+    RETRIEVAL_GRADED = "retrieval_graded"  # collection + graded qrels (0–3)
+    RETRIEVAL_BINARY = "retrieval_binary"  # collection + binary qrels (0/1)
+    OPEN_QA_FACTOID  = "open_qa_factoid"   # collection + short answer strings, no qrels
+    OPEN_QA_PASSAGE  = "open_qa_passage"   # collection + passage answers, no qrels
+    HYBRID           = "hybrid"            # collection + qrels + answer strings
+
+
+class QrelSource(Enum):
+    """How document relevance labels are obtained."""
+    GOLD           = "gold"          # explicit qrels from ir_datasets (trustworthy)
+    PROXY_EXACT    = "proxy_exact"   # answer string ∈ doc text — fast but noisy
+    PROXY_TOKEN_F1 = "proxy_token_f1"  # >50% answer token overlap — less noisy
+    CUSTOM         = "custom"        # caller supplies derive_qrels(ds, queries) fn
+
+
+# Maps task type → metrics that should be computed for that dataset
+METRICS_FOR_TASK: Dict[RAGTaskType, List[str]] = {
+    RAGTaskType.RETRIEVAL_GRADED: ["ndcg@5", "recall@5", "mrr"],
+    RAGTaskType.RETRIEVAL_BINARY: ["map@5",  "recall@5", "mrr"],
+    RAGTaskType.OPEN_QA_FACTOID:  ["recall@5", "em"],
+    RAGTaskType.OPEN_QA_PASSAGE:  ["recall@5"],
+    RAGTaskType.HYBRID:           ["ndcg@5", "recall@5", "mrr", "em"],
+}
+
+
 @dataclass
 class DatasetConfig:
     name: str
-    ir_id: str          # ir_datasets identifier
-    doc_cap: int        # max docs to index (0 = all)
-    n_queries: int      # how many queries to evaluate
-    graded: bool        # True = graded NDCG, False = binary
+    ir_id: str                              # ir_datasets identifier; "" for custom loaders
+    doc_cap: int                            # max docs to index (0 = all)
+    n_queries: int                          # how many queries to evaluate
+    task_type: RAGTaskType = RAGTaskType.RETRIEVAL_GRADED
+    qrel_source: QrelSource = QrelSource.GOLD
+    answers: Optional[Dict[str, List[str]]] = None  # {query_id: [ans1, ans2]}; for PROXY_* / HYBRID
+    derive_qrels: Optional[Callable] = None          # required for CUSTOM source
+
 
 DATASETS = [
-    DatasetConfig("trec-covid", "beir/trec-covid",       50_000, 20, graded=True),
-    DatasetConfig("nfcorpus",   "beir/nfcorpus/test",         0, 50, graded=True),
-    DatasetConfig("scifact",    "beir/scifact/test",           0, 50, graded=False),
+    DatasetConfig("trec-covid", "beir/trec-covid",    50_000, 20, RAGTaskType.RETRIEVAL_GRADED, QrelSource.GOLD),
+    DatasetConfig("nfcorpus",   "beir/nfcorpus/test",      0, 50, RAGTaskType.RETRIEVAL_GRADED, QrelSource.GOLD),
+    DatasetConfig("scifact",    "beir/scifact/test",        0, 50, RAGTaskType.RETRIEVAL_BINARY, QrelSource.GOLD),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,6 +160,19 @@ EXPERIMENTS: List[ExperimentConfig] = [
                      requires_llm=True),
     ExperimentConfig("F", "reformir_pipeline",   "monot5", "reformir", "reformir",   "convergence-tight", 30,  5,
                      requires_llm=True),
+
+    # ── Group G: Pipeline shape comparison (fixed medium budget) ──────────────
+    ExperimentConfig("G", "g_retrieve_only",       "noop",   "identity", "baseline",  None,                0,  1),
+    ExperimentConfig("G", "g_static_rerank",        "monot5", "identity", "baseline",  None,               15,  5),
+    ExperimentConfig("G", "g_adaptive_rerank",      "monot5", "identity", "reformir",  "convergence-tight", 15,  5),
+    ExperimentConfig("G", "g_reformulate_adaptive", "monot5", "reformir", "reformir",  "convergence-tight", 30,  5,
+                     requires_llm=True),
+
+    # ── Group H: Cost ablation across budget tiers (adaptive pipeline) ────────
+    ExperimentConfig("H", "h_budget_5",   "monot5", "identity", "reformir", "convergence-tight",  5,  2),
+    ExperimentConfig("H", "h_budget_15",  "monot5", "identity", "reformir", "convergence-tight", 15,  5),
+    ExperimentConfig("H", "h_budget_30",  "monot5", "identity", "reformir", "convergence-tight", 30,  5),
+    ExperimentConfig("H", "h_budget_50",  "monot5", "identity", "reformir", "convergence-tight", 50, 10),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,29 +180,67 @@ EXPERIMENTS: List[ExperimentConfig] = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_dataset(cfg: DatasetConfig):
-    """Returns (docs_for_index, queries, qrels_dict).
+    """Load a benchmark dataset and return the three components RAGtune needs.
 
-    qrels_dict: {(query_id, doc_id): relevance}
-    docs_for_index: generator of {"docno": ..., "text": ...}
+    Returns:
+        doc_iter_fn : callable → generator of {"docno": str, "text": str}
+        queries     : list of {"id": str, "text": str}
+        qrels       : dict of {(query_id, doc_id): int}
+                      For PROXY_* sources this is empty — relevance is derived
+                      per-query during run_experiment() from cfg.answers.
+                      For CUSTOM sources derive_qrels(ds, queries) is called here.
+
+    qrel_source semantics:
+        GOLD           — explicit labels from ir_datasets; trustworthy, comparable
+        PROXY_EXACT    — answer string ∈ doc text (fast, noisy; see warning below)
+        PROXY_TOKEN_F1 — >50% answer-token overlap with doc text (less noisy)
+        CUSTOM         — cfg.derive_qrels(ds, queries) supplies the mapping
+
+    ⚠ Proxy qrels measure answer *presence*, not document *relevance*.
+      A document can contain the answer string via coincidental mention or
+      wrong context. Scores from proxy qrels are not comparable to gold-qrel
+      scores and must be labelled clearly in any publication.
     """
+    if cfg.qrel_source != QrelSource.GOLD:
+        console.print(
+            f"[yellow]  ⚠ {cfg.name}: qrel_source={cfg.qrel_source.value} — "
+            f"scores are NOT comparable to gold-qrel benchmarks[/yellow]"
+        )
+    if cfg.qrel_source == QrelSource.CUSTOM and cfg.derive_qrels is None:
+        raise ValueError(
+            f"DatasetConfig '{cfg.name}' has qrel_source=CUSTOM but derive_qrels is None. "
+            "Provide a derive_qrels(ds, queries) → {{(qid, did): int}} function."
+        )
+
     console.print(f"[dim]  Loading {cfg.ir_id} …[/dim]")
     ds = ir_datasets.load(cfg.ir_id)
 
-    # Qrels
+    # Qrels — only populated for GOLD and CUSTOM sources
     qrels: Dict[Tuple[str, str], int] = {}
-    for qr in ds.qrels_iter():
-        qrels[(qr.query_id, qr.doc_id)] = qr.relevance
+    if cfg.qrel_source == QrelSource.GOLD:
+        for qr in ds.qrels_iter():
+            qrels[(qr.query_id, qr.doc_id)] = qr.relevance
 
-    # Queries (only those with at least one relevant document)
+    # Queries
     queries = []
-    for q in ds.queries_iter():
-        has_rel = any(rel > 0 for (qid, _), rel in qrels.items() if qid == q.query_id)
-        if has_rel:
+    if cfg.qrel_source == QrelSource.GOLD:
+        # Skip queries that have no relevant document in the qrels
+        for q in ds.queries_iter():
+            if any(rel > 0 for (qid, _), rel in qrels.items() if qid == q.query_id):
+                queries.append({"id": q.query_id, "text": q.text})
+            if len(queries) >= cfg.n_queries:
+                break
+    else:
+        for q in ds.queries_iter():
             queries.append({"id": q.query_id, "text": q.text})
-        if len(queries) >= cfg.n_queries:
-            break
+            if len(queries) >= cfg.n_queries:
+                break
 
-    # Corpus (generator, capped)
+    # CUSTOM: derive qrels now that we have queries
+    if cfg.qrel_source == QrelSource.CUSTOM:
+        qrels = cfg.derive_qrels(ds, queries)
+
+    # Corpus (generator, capped at doc_cap if set)
     def doc_iter():
         for i, doc in enumerate(ds.docs_iter()):
             if cfg.doc_cap and i >= cfg.doc_cap:
@@ -285,6 +368,61 @@ def count_iterations(output) -> int:
     return sum(1 for e in output.trace.events if e.action == "rerank_batch")
 
 
+def mean_average_precision(documents: List[ScoredDocument], qrels: Dict, query_id: str, k: int = 5) -> float:
+    """MAP@k for binary qrels."""
+    relevant = {did for (qid, did), rel in qrels.items() if qid == query_id and rel > 0}
+    if not relevant:
+        return 0.0
+    hits, running_sum = 0, 0.0
+    for i, doc in enumerate(documents[:k]):
+        if doc.id in relevant:
+            hits += 1
+            running_sum += hits / (i + 1)
+    return running_sum / min(len(relevant), k)
+
+
+def exact_match_at_1(
+    documents: List[ScoredDocument],
+    answers: Optional[Dict[str, List[str]]],
+    query_id: str,
+) -> float:
+    """1.0 if any gold answer string appears in the top-1 retrieved document."""
+    if not answers or query_id not in answers or not documents:
+        return 0.0
+    text = (documents[0].content or "").lower()
+    return float(any(ans.lower() in text for ans in answers[query_id]))
+
+
+def _token_f1_score(answer: str, text: str) -> float:
+    """Fraction of answer tokens present in text (proxy for containment)."""
+    a_toks = set(answer.lower().split())
+    t_toks = set(text.lower().split())
+    if not a_toks:
+        return 0.0
+    return len(a_toks & t_toks) / len(a_toks)
+
+
+def _derive_proxy_qrels(
+    docs: List[ScoredDocument],
+    query_id: str,
+    answers: List[str],
+    method: QrelSource,
+) -> Dict[Tuple[str, str], int]:
+    """Derive binary relevance for retrieved docs using answer-presence heuristics.
+
+    ⚠ Noisy by design — see load_dataset() docstring for caveats.
+    """
+    qrels = {}
+    for doc in docs:
+        text = (doc.content or "").lower()
+        if method == QrelSource.PROXY_EXACT:
+            rel = int(any(ans.lower() in text for ans in answers))
+        else:  # PROXY_TOKEN_F1
+            rel = int(any(_token_f1_score(ans, text) > 0.5 for ans in answers))
+        qrels[(query_id, doc.id)] = rel
+    return qrels
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Experiment runner
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,8 +432,11 @@ def run_experiment(
     controller: RAGtuneController,
     queries: List[Dict],
     qrels: Dict,
-    graded: bool,
+    ds_cfg: DatasetConfig,
 ) -> List[Dict[str, Any]]:
+    is_proxy = ds_cfg.qrel_source in (QrelSource.PROXY_EXACT, QrelSource.PROXY_TOKEN_F1)
+    task_metrics = METRICS_FOR_TASK.get(ds_cfg.task_type, ["ndcg@5", "recall@5", "mrr"])
+
     rows = []
     for q in queries:
         try:
@@ -305,21 +446,40 @@ def run_experiment(
             continue
 
         docs = output.documents
-        bs = output.final_budget_state
+        bs   = output.final_budget_state
 
-        ndcg = graded_ndcg_at_k(docs, qrels, q["id"]) if graded else graded_ndcg_at_k(docs, qrels, q["id"])
-        rows.append({
-            "group":              exp.group,
-            "config":             exp.name,
-            "query_id":           q["id"],
-            "ndcg@5":             ndcg,
-            "recall@5":           recall_at_k(docs, qrels, q["id"]),
-            "mrr":                mrr(docs, qrels, q["id"]),
-            "latency_ms":         bs.get("latency", 0),
-            "rerank_docs_used":   bs.get("rerank_docs", 0),
-            "reformulations_used":bs.get("reformulations", 0),
-            "n_iterations":       count_iterations(output),
-        })
+        # For proxy sources, derive per-query relevance from retrieved docs
+        effective_qrels = qrels
+        if is_proxy and ds_cfg.answers and q["id"] in ds_cfg.answers:
+            proxy = _derive_proxy_qrels(docs, q["id"], ds_cfg.answers[q["id"]], ds_cfg.qrel_source)
+            effective_qrels = {**qrels, **proxy}
+
+        row: Dict[str, Any] = {
+            "group":               exp.group,
+            "config":              exp.name,
+            "dataset":             ds_cfg.name,
+            "task_type":           ds_cfg.task_type.value,
+            "qrel_source":         ds_cfg.qrel_source.value,
+            "query_id":            q["id"],
+            "latency_ms":          bs.get("latency", 0),
+            "rerank_docs_used":    bs.get("rerank_docs", 0),
+            "reformulations_used": bs.get("reformulations", 0),
+            "n_iterations":        count_iterations(output),
+            # metrics — filled selectively below; zero if not applicable
+            "ndcg@5":   0.0,
+            "recall@5": 0.0,
+            "mrr":      0.0,
+            "map@5":    0.0,
+            "em":       0.0,
+        }
+
+        if "ndcg@5"   in task_metrics: row["ndcg@5"]   = graded_ndcg_at_k(docs, effective_qrels, q["id"])
+        if "recall@5" in task_metrics: row["recall@5"] = recall_at_k(docs, effective_qrels, q["id"])
+        if "mrr"      in task_metrics: row["mrr"]      = mrr(docs, effective_qrels, q["id"])
+        if "map@5"    in task_metrics: row["map@5"]    = mean_average_precision(docs, effective_qrels, q["id"])
+        if "em"       in task_metrics: row["em"]       = exact_match_at_1(docs, ds_cfg.answers, q["id"])
+
+        rows.append(row)
     return rows
 
 
@@ -354,6 +514,8 @@ def print_group_table(group: str, rows: List[Dict], dataset_name: str):
         "D": "Feedback Ablation",
         "E": "Ollama vs MonoT5",
         "F": "Full ReformIR Pipeline",
+        "G": "Pipeline Shape Comparison",
+        "H": "Cost Ablation (Adaptive Pipeline)",
     }
     title = f"Group {group} — {labels.get(group, '')}  [{dataset_name}]"
     t = Table(title=title, box=box.SIMPLE_HEAVY, show_lines=False)
@@ -432,9 +594,7 @@ def main():
                 console.print(f"[red]    Skipping (build failed): {e}[/red]")
                 continue
 
-            rows = run_experiment(exp, controller, queries, qrels, ds.graded)
-            for r in rows:
-                r["dataset"] = ds.name
+            rows = run_experiment(exp, controller, queries, qrels, ds)
             dataset_rows.extend(rows)
             all_rows.extend(rows)
 

@@ -11,7 +11,6 @@ if not pt.started():
 
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.budget import CostBudget
-from ragtune.core.types import RerankStrategy
 from ragtune.adapters.pyterrier import PyTerrierRetriever
 from ragtune.components.rerankers import (
     MultiStrategyReranker, 
@@ -95,7 +94,6 @@ def run_comparison():
     console.print(f"[dim]Loaded {len(qrels)} qrels. Sample keys: {list(qrels.keys())[:3]}[/dim]")
     
     # 2. Setup Multi-Strategy Reranker
-    from ragtune.core.types import RerankStrategy
     strategies = {
         "llm": SimulatedReranker(), 
         "cross_encoder": CrossEncoderReranker(),

@@ -11,6 +11,10 @@ RAGtune is budget-aware iterative RAG middleware. Rather than a static retrieve-
 ```
 docs/
 ├── README.md                   ← this file
+├── MANIFEST.md                 ← documentation coverage tracker (run scripts/check_docs.py)
+│
+├── onboarding/                 ← guides for integrating new datasets and benchmarks
+│   └── dataset_integration.md  step-by-step: DatasetConfig, RAGTaskType, QrelSource
 │
 ├── design/                     ← versioned design specifications
 │   ├── design_v0_54.md         baseline iterative loop
@@ -49,6 +53,8 @@ docs/
 | View or present the slides | `presentations/ragtune-feedback-driven-retrieval-group-talk.pdf` |
 | Re-render the slides | `marp presentations/ragtune-feedback-driven-retrieval-group-talk.md --pdf` |
 | Check what's planned next | `roadmap.md` |
+| Add a new benchmark or dataset | `onboarding/dataset_integration.md` |
+| Check documentation coverage | `python scripts/check_docs.py` → `MANIFEST.md` |
 
 ---
 
