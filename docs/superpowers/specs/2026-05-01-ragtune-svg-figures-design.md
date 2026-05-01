@@ -100,7 +100,7 @@ Update figure slides to use full-bleed pattern:
 
 **Location:** `talks/booking-2026/booking-diagrams/`
 
-**Marp deck:** `talks/booking-2026/booking-2026.md` (to be created)  
+**Marp deck:** `talks/booking-2026/booking-ragtune.md` (to be created)  
 Same full-bleed pattern.
 
 ---
@@ -113,11 +113,13 @@ Same full-bleed pattern.
 **Title:** "Standard RAG is a one-way street"  
 **Type:** architecture
 
+**Base geometry:** Adapt directly from `/Users/avishekanand/slides/booking-2026/booking-diagrams/figures/slide_p10_cascade_pipeline.svg`. Reuse the exact SVG geometry: `viewBox="0 130 1100 480"`, Query circle at cx=130, Retrieve box at x=240, top-1000 dot pool at x=430–710, Rerank box at x=740, Generate box at x=920. Preserve all dot coordinates and legend verbatim.
+
 | Step | Shows |
 |------|-------|
-| s1 | Three boxes: **Retriever** (cool) · **Reranker** (ink) · **LLM** (ink). No arrows. |
-| s2 | Solid black forward arrows. Label: "N = 1000 candidates" above Retriever, "top-K" above Reranker. Gray candidate-pool dot cluster between Retriever and Reranker. |
-| s3 | Broken return path: faint gray dashed arrow from LLM back toward Retriever with ✗. Footer: *"No feedback path. Every query treated identically."* |
+| s1 | Full p10 geometry: Query → Retrieve → top-1000 pool (gray + teal dots) → Rerank → Generate, all arrows. Replace p10's "THE ASSUMPTION" callout with title header: *"Standard RAG is a one-way street"* / italic subtitle *"One pass. No adaptation."* |
+| s2 | Same as s1, add annotation labels: `"N = 1000"` above the pool box, `"top-K"` on the arrow entering Rerank. Add `"LLM / Generate"` label to the Generate box subtitle. |
+| s3 | Add a broken return path: faint gray dashed arrow (`stroke="#b8b3a8" stroke-dasharray="6,4"`) arcing from Generate back toward Retrieve, terminated with an ✗ mark (two crossing lines, `stroke="#b8b3a8"`). Footer accent line + text: *"No feedback path. Every query treated identically."* |
 
 ---
 
@@ -125,11 +127,13 @@ Same full-bleed pattern.
 **Title:** "RAGtune: The Loop"  
 **Type:** architecture
 
+**Base geometry:** Start from the p10 pipeline geometry as structural reference (box sizing: ~140–160px wide × 80px tall, rx=4, stroke-width=2). The loop replaces the linear left-to-right layout with a clockwise cycle. Use the same `viewBox="0 130 1100 480"` to keep visual weight consistent with A1. The top-1000 dot cloud from p10 can be reused inside the CandidatePool box as a visual shorthand.
+
 | Step | Shows |
 |------|-------|
-| s1 | Four boxes in clockwise cycle: **CandidatePool** (cool, top-left) · **Estimator** (ink, top-right) · **Scheduler** (ink, bottom-right) · **Reranker** (ink, bottom-left). No arrows. Subtitle: "Budget-aware iterative reranking". |
-| s2 | Solid black arrows clockwise: Pool→Estimator→Scheduler→Reranker→Pool. Arrow labels: "priorities" · "batch" · "scores" · "update". |
-| s3 | Dashed accent arrow from Reranker back to Estimator, labelled "signal". Small **CostTracker** progress bar top-right. Footer: *"Same budget. Scheduling driven by feedback, not retrieval rank."* |
+| s1 | Four boxes arranged clockwise (roughly square formation, centered ~550,320): **CandidatePool** (cool `#2a4747` stroke, top-left) · **Estimator** (ink stroke, top-right) · **Scheduler** (ink stroke, bottom-right) · **Reranker** (ink stroke, bottom-left). Small dot-grid inside CandidatePool (reuse p10 dot geometry, scaled down). No arrows. Subtitle: *"Budget-aware iterative reranking"*. |
+| s2 | Solid black arrows clockwise connecting all four boxes. Small italic labels on arrows: `"priorities"` (Pool→Estimator) · `"batch"` (Estimator→Scheduler) · `"scores"` (Scheduler→Reranker) · `"update"` (Reranker→Pool). |
+| s3 | Add dashed accent arrow (`stroke="#c8553d" stroke-dasharray="8,5" marker-end="url(#arrowAccent)"`) from Reranker diagonally to Estimator, labelled `"signal"`. Add small **CostTracker** progress bar (ink-bordered rect, ~120×18px) in top-right corner with label `"budget"`. Footer accent line + text: *"Same budget. Scheduling driven by feedback, not retrieval rank."* |
 
 ---
 
