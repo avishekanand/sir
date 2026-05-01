@@ -41,7 +41,6 @@
        ============================================================ -->
 
   <rect x="430" y="225" width="280" height="190" fill="none" stroke="#6b665e" stroke-width="1" stroke-dasharray="4,4" rx="3"/>
-  <text x="570" y="218" font-size="13" fill="#6b665e" text-anchor="middle" font-weight="600" letter-spacing="0.3">top-1000 candidates</text>
 
   <!-- candidate dots: 6 rows × 12 cols, spacing 22 -->
   <g fill="#b8b3a8">
