@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 720">
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1a1a1a"/>
+    </marker>
+    <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c8553d"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="720" fill="#faf7f2"/>
+
+  <!-- Header -->
+  <text x="80" y="68" font-size="32" font-weight="400" fill="#1a1a1a" font-family="Georgia, 'Times New Roman', serif" letter-spacing="0.2">RAGtune: The Loop</text>
+  <text x="80" y="94" font-size="16" font-style="italic" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" letter-spacing="0.3">Budget-aware iterative reranking</text>
+  <line x1="80" y1="112" x2="200" y2="112" stroke="#1a1a1a" stroke-width="1.2"/>
+
+  <!-- CandidatePool box (cool #2a4747 stroke) -->
+  <rect x="170" y="270" width="160" height="80" rx="4" fill="#faf7f2" stroke="#2a4747" stroke-width="2.2"/>
+  <text x="250" y="303" font-size="14" font-weight="bold" fill="#2a4747" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">CandidatePool</text>
+  <text x="250" y="322" font-size="11" font-style="italic" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">CANDIDATE → RERANKED</text>
+
+  <!-- Estimator box -->
+  <rect x="770" y="270" width="160" height="80" rx="4" fill="#faf7f2" stroke="#1a1a1a" stroke-width="2"/>
+  <text x="850" y="303" font-size="14" font-weight="bold" fill="#1a1a1a" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">Estimator</text>
+  <text x="850" y="322" font-size="11" font-style="italic" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">value(pool)</text>
+
+  <!-- Scheduler box -->
+  <rect x="770" y="460" width="160" height="80" rx="4" fill="#faf7f2" stroke="#1a1a1a" stroke-width="2"/>
+  <text x="850" y="493" font-size="14" font-weight="bold" fill="#1a1a1a" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">Scheduler</text>
+  <text x="850" y="512" font-size="11" font-style="italic" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">select_batch()</text>
+
+  <!-- Reranker box -->
+  <rect x="170" y="460" width="160" height="80" rx="4" fill="#faf7f2" stroke="#1a1a1a" stroke-width="2"/>
+  <text x="250" y="493" font-size="14" font-weight="bold" fill="#1a1a1a" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">Reranker</text>
+  <text x="250" y="512" font-size="11" font-style="italic" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle">rerank(batch)</text>
+
+  <!-- clockwise forward-flow arrows + labels -->
+  <!-- Pool → Estimator (rightward) -->
+  <line x1="330" y1="310" x2="770" y2="310" stroke="#1a1a1a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="550" y="298" font-size="13" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle" font-style="italic">priorities</text>
+
+  <!-- Estimator → Scheduler (downward) -->
+  <line x1="850" y1="350" x2="850" y2="460" stroke="#1a1a1a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="876" y="410" font-size="13" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" font-style="italic">batch</text>
+
+  <!-- Scheduler → Reranker (leftward) -->
+  <line x1="770" y1="500" x2="330" y2="500" stroke="#1a1a1a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="550" y="518" font-size="13" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle" font-style="italic">scores</text>
+
+  <!-- Reranker → Pool (upward) -->
+  <line x1="250" y1="460" x2="250" y2="350" stroke="#1a1a1a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="224" y="410" font-size="13" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="end" font-style="italic">update</text>
+
+  <!-- dashed accent feedback arrow Reranker → Estimator -->
+  <path d="M 330,500 C 500,590 620,200 770,310"
+        fill="none" stroke="#c8553d" stroke-width="2.4"
+        stroke-dasharray="8,5" marker-end="url(#arrowAccent)"/>
+  <text x="530" y="582" font-size="13" fill="#c8553d" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle" font-style="italic">signal</text>
+
+  <!-- CostTracker budget bar (top-right) -->
+  <text x="900" y="148" font-size="11" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" font-weight="600" letter-spacing="1">BUDGET</text>
+  <rect x="890" y="155" width="150" height="16" fill="none" stroke="#1a1a1a" stroke-width="1.2" rx="2"/>
+  <rect x="890" y="155" width="90"  height="16" fill="#1a1a1a" fill-opacity="0.15" rx="2"/>
+  <text x="965" y="188" font-size="11" fill="#6b665e" font-family="Georgia, 'Times New Roman', serif" text-anchor="middle" font-style="italic">60% consumed</text>
+
+  <!-- footer -->
+  <line x1="80" y1="620" x2="200" y2="620" stroke="#c8553d" stroke-width="1.5"/>
+  <text x="80" y="648" font-size="16" fill="#1a1a1a" font-family="Georgia, 'Times New Roman', serif">Same budget. Scheduling driven by feedback, not retrieval rank.</text>
+  <text x="80" y="673" font-size="14" fill="#c8553d" font-family="Georgia, 'Times New Roman', serif" font-weight="700">The feedback signal changes what gets scheduled next.</text>
+
+</svg>
