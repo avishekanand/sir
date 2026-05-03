@@ -14,17 +14,14 @@ This means:
 3. Tokens only limit how many documents are returned during assembly, after all
    reranking work has already been performed.
 """
-import pytest
 from typing import List
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.types import ScoredDocument, RAGtuneContext, CostObject, EstimatorOutput
 from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseScheduler, BaseEstimator
 from ragtune.core.budget import CostBudget, CostTracker
-from ragtune.core.pool import CandidatePool, PoolItem, ItemState
-from ragtune.core.types import ControllerTrace, BatchProposal
+from ragtune.core.pool import CandidatePool
+from ragtune.core.types import ControllerTrace, BatchProposal, RemainingBudgetView
 from ragtune.components.assemblers import GreedyAssembler
-from ragtune.components.rerankers import SimulatedReranker
-from ragtune.components.estimators import BaselineEstimator
 
 
 class ManyDocRetriever(BaseRetriever):
@@ -52,17 +49,14 @@ class IdentityReformulator(BaseReformulator):
 
 
 class CountingReranker(BaseReranker):
-    """Reranker that tracks how many times it was called and what batch sizes."""
-    call_count = 0
-    batch_sizes = []
-
+    """Reranker that tracks how many times it was called and what batch sizes, using instance state."""
     def __init__(self):
         self.call_count = 0
         self.batch_sizes = []
 
     def rerank(self, documents: list, context: RAGtuneContext, strategy: str = None) -> dict:
-        CountingReranker.call_count += 1
-        CountingReranker.batch_sizes.append(len(documents))
+        self.call_count += 1
+        self.batch_sizes.append(len(documents))
         return {doc.doc_id: doc.final_score() + 0.1 for doc in documents}
 
 
@@ -71,7 +65,7 @@ class CountingScheduler(BaseScheduler):
     def __init__(self, batch_size: int = 5):
         self.batch_size = batch_size
 
-    def select_batch(self, pool: CandidatePool, budget) -> CostObject:
+    def select_batch(self, pool: CandidatePool, budget: RemainingBudgetView) -> BatchProposal | None:
         eligible = pool.get_eligible()
         if not eligible or budget.remaining_rerank_docs <= 0:
             return None
@@ -99,13 +93,12 @@ def test_token_budget_zero_prevents_all_reranking():
 
     This is the ONLY scenario where the token budget currently affects loop entry.
     """
-    CountingReranker.call_count = 0
-    CountingReranker.batch_sizes = []
+    reranker = CountingReranker()
 
     controller = RAGtuneController(
         retriever=ManyDocRetriever(n_docs=10),
         reformulator=IdentityReformulator(),
-        reranker=CountingReranker(),
+        reranker=reranker,
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=5),
         estimator=TestEstimator(),
@@ -118,8 +111,8 @@ def test_token_budget_zero_prevents_all_reranking():
 
     output = controller.run("test query")
 
-    assert CountingReranker.call_count == 0, (
-        f"Expected 0 reranker calls with tokens=0, got {CountingReranker.call_count}. "
+    assert reranker.call_count == 0, (
+        f"Expected 0 reranker calls with tokens=0, got {reranker.call_count}. "
         "Token budget of 0 prevents loop entry entirely."
     )
     # rerank_docs is only consumed during the loop, so it stays at 0
@@ -137,13 +130,12 @@ def test_positive_token_budget_does_not_constrain_reranking_iterations():
     so is_exhausted() cannot return True on token depletion mid-loop.
     The token budget only affects assembly, not the number of reranking iterations.
     """
-    CountingReranker.call_count = 0
-    CountingReranker.batch_sizes = []
+    reranker = CountingReranker()
 
     controller = RAGtuneController(
         retriever=ManyDocRetriever(n_docs=20, tokens_per_doc=10),
         reformulator=IdentityReformulator(),
-        reranker=CountingReranker(),
+        reranker=reranker,
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=4),
         estimator=TestEstimator(),
@@ -163,9 +155,9 @@ def test_positive_token_budget_does_not_constrain_reranking_iterations():
         f"Expected rerank_docs > 0 with positive token budget, got {rerank_docs_consumed}"
     )
 
-    assert CountingReranker.call_count >= 4, (
+    assert reranker.call_count >= 4, (
         f"Expected at least 4 reranker calls (20 docs / batch_size=4), "
-        f"got {CountingReranker.call_count}. "
+        f"got {reranker.call_count}. "
         "The reranking loop ran despite a token budget of only 3 tokens, "
         "demonstrating that tokens are NOT consumed during the iterative loop."
     )
@@ -184,13 +176,12 @@ def test_token_budget_versus_rerank_docs_budget_independence():
     With rerank_docs=20 and tokens=3, the loop should consume all 20 rerank_docs
     budget without ever checking or consuming tokens mid-loop.
     """
-    CountingReranker.call_count = 0
-    CountingReranker.batch_sizes = []
+    reranker = CountingReranker()
 
     controller = RAGtuneController(
         retriever=ManyDocRetriever(n_docs=20, tokens_per_doc=100),
         reformulator=IdentityReformulator(),
-        reranker=CountingReranker(),
+        reranker=reranker,
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=5),
         estimator=TestEstimator(),
@@ -227,13 +218,12 @@ def test_tokens_consumed_only_during_assembly():
     This verifies the root cause: BatchProposal.expected_cost carries tokens=0
     from all schedulers, so tracker.consume() never touches the token budget.
     """
-    CountingReranker.call_count = 0
-    CountingReranker.batch_sizes = []
+    reranker = CountingReranker()
 
     controller = RAGtuneController(
         retriever=ManyDocRetriever(n_docs=10, tokens_per_doc=5),
         reformulator=IdentityReformulator(),
-        reranker=CountingReranker(),
+        reranker=reranker,
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=3),
         estimator=TestEstimator(),
@@ -250,8 +240,8 @@ def test_tokens_consumed_only_during_assembly():
     rerank_calls_consumed = output.final_budget_state.get("rerank_calls", 0)
     tokens_consumed = output.final_budget_state.get("tokens", 0)
 
-    assert CountingReranker.call_count == rerank_calls_consumed, (
-        f"Reranker call count {CountingReranker.call_count} should match "
+    assert reranker.call_count == rerank_calls_consumed, (
+        f"Reranker call count {reranker.call_count} should match "
         f"rerank_calls consumed {rerank_calls_consumed}"
     )
 
@@ -264,9 +254,9 @@ def test_tokens_consumed_only_during_assembly():
     )
 
     estimated_tokens_from_assembly = len(output.documents) * 5
-    assert tokens_consumed == estimated_tokens_from_assembly or tokens_consumed < estimated_tokens_from_assembly, (
-        f"Tokens consumed ({tokens_consumed}) should roughly match assembly estimates "
-        f"(docs returned: {len(output.documents)} × tokens_per_doc=5 = {estimated_tokens_from_assembly}), "
+    assert tokens_consumed <= estimated_tokens_from_assembly, (
+        f"Tokens consumed ({tokens_consumed}) should be at most the assembly estimate "
+        f"(docs returned: {len(output.documents)} x tokens_per_doc=5 = {estimated_tokens_from_assembly}), "
         "confirming tokens are consumed during assembly only."
     )
 
@@ -281,13 +271,12 @@ def test_assembly_token_filtering_with_low_token_budget():
     whose estimated token count fits in 1 token (essentially 0 documents).
     The reranking work was done but the result is filtered to nothing.
     """
-    CountingReranker.call_count = 0
-    CountingReranker.batch_sizes = []
+    reranker = CountingReranker()
 
     controller = RAGtuneController(
         retriever=ManyDocRetriever(n_docs=10, tokens_per_doc=10),
         reformulator=IdentityReformulator(),
-        reranker=CountingReranker(),
+        reranker=reranker,
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=5),
         estimator=TestEstimator(),
@@ -301,16 +290,15 @@ def test_assembly_token_filtering_with_low_token_budget():
     output = controller.run("test query")
 
     rerank_docs_consumed = output.final_budget_state["rerank_docs"]
-    tokens_consumed = output.final_budget_state.get("tokens", 0)
 
     assert rerank_docs_consumed == 10, (
         f"All rerank_docs budget (10) should be consumed: got {rerank_docs_consumed}. "
         "The loop ran to completion based on rerank_docs, not tokens."
     )
 
-    assert CountingReranker.call_count >= 2, (
+    assert reranker.call_count >= 2, (
         f"Reranking happened despite low token budget: "
-        f"{CountingReranker.call_count} calls, {rerank_docs_consumed} docs reranked."
+        f"{reranker.call_count} calls, {rerank_docs_consumed} docs reranked."
     )
 
     assert len(output.documents) == 0, (
@@ -329,7 +317,6 @@ def test_batch_proposal_expected_cost_carries_no_tokens():
     """
     from ragtune.components.schedulers import ActiveLearningScheduler, GracefulDegradationScheduler
     from ragtune.core.pool import CandidatePool
-    from ragtune.core.types import RemainingBudgetView
 
     pool = CandidatePool()
     for i in range(5):
