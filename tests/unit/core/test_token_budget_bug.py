@@ -1,20 +1,15 @@
 """
-Tests for token budget behavior in the RAGtune iterative loop.
+Tests for token budget misintegration in the RAGtune iterative loop (refs #1).
 
-These tests identify and document a bug where the token budget dimension
-in CostTracker is not properly integrated into the iterative reranking loop:
-tokens are only consumed during assembly (after the loop exits), not during
-the loop itself via BatchProposal.expected_cost.
-
-This means:
-1. is_exhausted() checking tokens at loop entry is only meaningful if tokens=0
-   at initialization (which prevents the loop entirely), not if tokens are
-   exhausted during loop iterations.
-2. A positive token budget does not constrain the number of reranking iterations.
-3. Tokens only limit how many documents are returned during assembly, after all
-   reranking work has already been performed.
+These tests verify that the token budget dimension is properly integrated into
+the iterative reranking loop. Tests that assert desired behavior are marked
+xfail(strict=True) because the current implementation consumes tokens only
+during assembly, not during the iterative loop itself. When the bug is fixed,
+these tests will start passing (XPASS), signalling that the xfail markers
+should be removed.
 """
-from typing import List
+import pytest
+from typing import List, Optional
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.types import ScoredDocument, RAGtuneContext, CostObject, EstimatorOutput
 from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseScheduler, BaseEstimator
@@ -49,12 +44,12 @@ class IdentityReformulator(BaseReformulator):
 
 
 class CountingReranker(BaseReranker):
-    """Reranker that tracks how many times it was called and what batch sizes, using instance state."""
+    """Reranker that tracks how many times it was called, using instance state."""
     def __init__(self):
         self.call_count = 0
-        self.batch_sizes = []
+        self.batch_sizes: List[int] = []
 
-    def rerank(self, documents: list, context: RAGtuneContext, strategy: str = None) -> dict:
+    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> dict:
         self.call_count += 1
         self.batch_sizes.append(len(documents))
         return {doc.doc_id: doc.final_score() + 0.1 for doc in documents}
@@ -65,7 +60,7 @@ class CountingScheduler(BaseScheduler):
     def __init__(self, batch_size: int = 5):
         self.batch_size = batch_size
 
-    def select_batch(self, pool: CandidatePool, budget: RemainingBudgetView) -> BatchProposal | None:
+    def select_batch(self, pool: CandidatePool, budget: RemainingBudgetView) -> Optional[BatchProposal]:
         eligible = pool.get_eligible()
         if not eligible or budget.remaining_rerank_docs <= 0:
             return None
@@ -88,10 +83,10 @@ class TestEstimator(BaseEstimator):
 
 def test_token_budget_zero_prevents_all_reranking():
     """
-    Test that tokens=0 at initialization causes is_exhausted() to return True
-    immediately and prevents the loop from running entirely.
+    Test that tokens=0 at initialization prevents the loop from running entirely.
 
-    This is the ONLY scenario where the token budget currently affects loop entry.
+    This is the correct current behavior: is_exhausted() returns True immediately
+    when tokens=0, and the loop never executes.
     """
     reranker = CountingReranker()
 
@@ -112,23 +107,27 @@ def test_token_budget_zero_prevents_all_reranking():
     output = controller.run("test query")
 
     assert reranker.call_count == 0, (
-        f"Expected 0 reranker calls with tokens=0, got {reranker.call_count}. "
-        "Token budget of 0 prevents loop entry entirely."
+        f"Expected 0 reranker calls with tokens=0, got {reranker.call_count}"
     )
-    # rerank_docs is only consumed during the loop, so it stays at 0
     assert output.final_budget_state.get("rerank_docs", 0) == 0
-    # tokens are consumed during assembly even when loop doesn't run
-    # because the token budget only gates assembly, not loop entry
 
 
-def test_positive_token_budget_does_not_constrain_reranking_iterations():
+@pytest.mark.xfail(
+    strict=True,
+    reason="Token budget not consumed during iterative loop (refs #1). "
+           "Currently tokens=3 does not limit reranking because tokens "
+           "are only consumed post-loop during assembly."
+)
+def test_positive_token_budget_limits_reranking_iterations():
     """
-    Test that a positive but very small token budget (e.g., 3 tokens) does NOT
-    prevent the reranking loop from running its full course based on rerank_docs.
+    Test that a positive token budget constrains the number of reranking iterations.
 
-    This demonstrates the core bug: tokens are not consumed during the loop,
-    so is_exhausted() cannot return True on token depletion mid-loop.
-    The token budget only affects assembly, not the number of reranking iterations.
+    With tokens=3, rerank_docs=20, and documents costing ~10 tokens each, the loop
+    should exhaust the token budget before consuming all 20 rerank_docs. Currently
+    the loop ignores the token budget and consumes all rerank_docs.
+
+    When this bug is fixed, rerank_docs_consumed will be strictly less than the
+    configured rerank_docs limit because token exhaustion will stop the loop early.
     """
     reranker = CountingReranker()
 
@@ -148,38 +147,34 @@ def test_positive_token_budget_does_not_constrain_reranking_iterations():
 
     output = controller.run("test query")
 
+    rerank_docs_limit = 20
     rerank_docs_consumed = output.final_budget_state["rerank_docs"]
-    tokens_consumed = output.final_budget_state.get("tokens", 0)
 
-    assert rerank_docs_consumed > 0, (
-        f"Expected rerank_docs > 0 with positive token budget, got {rerank_docs_consumed}"
-    )
-
-    assert reranker.call_count >= 4, (
-        f"Expected at least 4 reranker calls (20 docs / batch_size=4), "
-        f"got {reranker.call_count}. "
-        "The reranking loop ran despite a token budget of only 3 tokens, "
-        "demonstrating that tokens are NOT consumed during the iterative loop."
-    )
-
-    assert tokens_consumed >= 3, (
-        f"Token budget of 3 should be exhausted or nearly exhausted after assembly, "
-        f"but tokens_consumed={tokens_consumed}. Tokens are consumed AFTER the loop "
-        "during assembly, not during the loop itself."
+    assert rerank_docs_consumed < rerank_docs_limit, (
+        f"Token budget of 3 should prevent consuming all {rerank_docs_limit} "
+        f"rerank_docs, but {rerank_docs_consumed} were consumed. "
+        "Tokens are ignored during the loop (bug #1)."
     )
 
 
-def test_token_budget_versus_rerank_docs_budget_independence():
+@pytest.mark.xfail(
+    strict=True,
+    reason="Token budget not consumed during iterative loop (refs #1). "
+           "The token budget should constrain reranking independently of "
+           "rerank_docs, but currently tokens and rerank_docs are decoupled."
+)
+def test_token_budget_constrains_reranking_before_docs_exhausted():
     """
-    Test that rerank_docs and tokens are independent budget dimensions during the loop.
+    Test that the token budget stops reranking even when rerank_docs remain.
 
-    With rerank_docs=20 and tokens=3, the loop should consume all 20 rerank_docs
-    budget without ever checking or consuming tokens mid-loop.
+    With tokens=3 and rerank_docs=50, the loop should halt due to token exhaustion,
+    not due to rerank_docs exhaustion. Currently all 50 rerank_docs are consumed
+    because the token check in is_exhausted() is ineffective for positive values.
     """
     reranker = CountingReranker()
 
     controller = RAGtuneController(
-        retriever=ManyDocRetriever(n_docs=20, tokens_per_doc=100),
+        retriever=ManyDocRetriever(n_docs=50, tokens_per_doc=100),
         reformulator=IdentityReformulator(),
         reranker=reranker,
         assembler=GreedyAssembler(),
@@ -187,48 +182,49 @@ def test_token_budget_versus_rerank_docs_budget_independence():
         estimator=TestEstimator(),
         budget=CostBudget(limits={
             "tokens": 3,
-            "rerank_docs": 20,
-            "rerank_calls": 10,
+            "rerank_docs": 50,
+            "rerank_calls": 20,
         }),
     )
 
     output = controller.run("test query")
 
+    rerank_docs_limit = 50
     rerank_docs_consumed = output.final_budget_state["rerank_docs"]
-    tokens_consumed = output.final_budget_state.get("tokens", 0)
 
-    assert rerank_docs_consumed == 20, (
-        f"Expected all 20 rerank_docs consumed, got {rerank_docs_consumed}. "
-        "The rerank_docs budget fully constrained the loop iterations."
-    )
-
-    assert tokens_consumed >= 3, (
-        f"Tokens only consumed during assembly (post-loop): tokens_consumed={tokens_consumed}. "
-        "If this value is 0, it means assembly returned 0 documents due to token exhaustion. "
-        "If this value > 0, it reflects documents that fit within the 3-token budget during assembly. "
-        "Either way, tokens did not constrain the reranking loop itself."
+    assert rerank_docs_consumed < rerank_docs_limit, (
+        f"Token budget of 3 should limit reranking before consuming all "
+        f"{rerank_docs_limit} rerank_docs, but {rerank_docs_consumed} were consumed. "
+        "Token budget does not constrain the loop (bug #1)."
     )
 
 
-def test_tokens_consumed_only_during_assembly():
+@pytest.mark.xfail(
+    strict=True,
+    reason="Token budget not consumed during iterative loop (refs #1). "
+           "Tokens should accumulate via tracker.consume() during the loop, "
+           "not just via try_consume_tokens() during assembly."
+)
+def test_tokens_consumed_during_loop_not_just_assembly():
     """
-    Test that token consumption occurs during GreedyAssembler.assemble(), not
-    during the controller's iterative loop via tracker.consume(proposal.expected_cost).
+    Test that token consumption reflects loop activity, not just assembly activity.
 
-    This verifies the root cause: BatchProposal.expected_cost carries tokens=0
-    from all schedulers, so tracker.consume() never touches the token budget.
+    Currently tokens_consumed == len(documents_returned) * token_count, which means
+    tokens are only consumed by GreedyAssembler.assemble() after the loop exits.
+    After the fix, tokens should also reflect per-batch consumption during the loop,
+    so tokens_consumed should exceed the assembly-only estimate.
     """
     reranker = CountingReranker()
 
     controller = RAGtuneController(
-        retriever=ManyDocRetriever(n_docs=10, tokens_per_doc=5),
+        retriever=ManyDocRetriever(n_docs=10, tokens_per_doc=50),
         reformulator=IdentityReformulator(),
         reranker=reranker,
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=3),
         estimator=TestEstimator(),
         budget=CostBudget(limits={
-            "tokens": 50,
+            "tokens": 1000,
             "rerank_docs": 50,
             "rerank_calls": 10,
         }),
@@ -236,40 +232,36 @@ def test_tokens_consumed_only_during_assembly():
 
     output = controller.run("test query")
 
-    rerank_docs_consumed = output.final_budget_state["rerank_docs"]
     rerank_calls_consumed = output.final_budget_state.get("rerank_calls", 0)
     tokens_consumed = output.final_budget_state.get("tokens", 0)
 
-    assert reranker.call_count == rerank_calls_consumed, (
-        f"Reranker call count {reranker.call_count} should match "
-        f"rerank_calls consumed {rerank_calls_consumed}"
-    )
+    assembly_only_token_estimate = len(output.documents) * 50
 
     assert rerank_calls_consumed > 0, "Reranking happened during the loop"
 
-    assert tokens_consumed > 0, (
-        f"Tokens consumed ({tokens_consumed}) must come from assembly, not from "
-        "tracker.consume(proposal.expected_cost) because all schedulers create "
-        "BatchProposal with expected_cost=CostObject(docs=..., calls=..., tokens=0)"
-    )
-
-    estimated_tokens_from_assembly = len(output.documents) * 5
-    assert tokens_consumed <= estimated_tokens_from_assembly, (
-        f"Tokens consumed ({tokens_consumed}) should be at most the assembly estimate "
-        f"(docs returned: {len(output.documents)} x tokens_per_doc=5 = {estimated_tokens_from_assembly}), "
-        "confirming tokens are consumed during assembly only."
+    assert tokens_consumed > assembly_only_token_estimate, (
+        f"Tokens consumed ({tokens_consumed}) should exceed the assembly-only "
+        f"estimate ({assembly_only_token_estimate}) because per-batch token costs "
+        "should accumulate during the loop via tracker.consume(proposal.expected_cost). "
+        "Currently tokens are consumed only during assembly (bug #1)."
     )
 
 
-def test_assembly_token_filtering_with_low_token_budget():
+@pytest.mark.xfail(
+    strict=True,
+    reason="Token budget not consumed during iterative loop (refs #1). "
+           "The loop should not perform reranking work that cannot produce "
+           "useful output due to token exhaustion."
+)
+def test_low_token_budget_prevents_wasted_reranking():
     """
-    Test that with a very low token budget, assembly filters documents but
-    the reranking loop already completed its work.
+    Test that a token budget insufficient for any document prevents reranking.
 
-    Scenario: Set tokens=1, rerank_docs=20. Loop runs and reranks all 20 docs
-    (consuming all rerank_docs budget). Then assembly can only return documents
-    whose estimated token count fits in 1 token (essentially 0 documents).
-    The reranking work was done but the result is filtered to nothing.
+    With tokens=1 and documents costing 10 tokens each, no document can fit in
+    the token budget during assembly. A properly integrated token budget should
+    prevent the loop from reranking documents that cannot be returned. Currently
+    all documents are reranked and then assembly returns zero results, wasting
+    the reranking computation.
     """
     reranker = CountingReranker()
 
@@ -282,7 +274,7 @@ def test_assembly_token_filtering_with_low_token_budget():
         estimator=TestEstimator(),
         budget=CostBudget(limits={
             "tokens": 1,
-            "rerank_docs": 10,
+            "rerank_docs": 50,
             "rerank_calls": 10,
         }),
     )
@@ -291,67 +283,60 @@ def test_assembly_token_filtering_with_low_token_budget():
 
     rerank_docs_consumed = output.final_budget_state["rerank_docs"]
 
-    assert rerank_docs_consumed == 10, (
-        f"All rerank_docs budget (10) should be consumed: got {rerank_docs_consumed}. "
-        "The loop ran to completion based on rerank_docs, not tokens."
-    )
-
-    assert reranker.call_count >= 2, (
-        f"Reranking happened despite low token budget: "
-        f"{reranker.call_count} calls, {rerank_docs_consumed} docs reranked."
-    )
-
-    assert len(output.documents) == 0, (
-        f"Expected 0 documents returned (1 token budget insufficient for any doc at ~13 estimated tokens), "
-        f"got {len(output.documents)}. Token budget filtered at assembly, but all reranking was already done."
+    assert rerank_docs_consumed == 0, (
+        f"Token budget of 1 should prevent all reranking because no document "
+        f"can fit in 1 token, but {rerank_docs_consumed} docs were reranked. "
+        "Reranking work was performed despite being guaranteed to produce no "
+        "useful output (bug #1)."
     )
 
 
-def test_batch_proposal_expected_cost_carries_no_tokens():
+@pytest.mark.xfail(
+    strict=True,
+    reason="Schedulers do not populate per-batch token estimates (refs #1). "
+           "BatchProposal.expected_cost.tokens should reflect estimated token "
+           "consumption for the selected batch to allow token-aware scheduling."
+)
+def test_schedulers_provide_per_batch_token_estimates():
     """
-    Test that scheduler.create_batch returns CostObject with tokens=0 by default.
+    Test that schedulers populate expected_cost.tokens with per-batch estimates.
 
-    This is the root cause: if expected_cost.tokens were populated by schedulers
-    and consumed during the loop, the token budget would properly constrain iterations.
-    Currently CostObject(tokens=0) from schedulers means consume() skips token consumption.
+    Currently all schedulers create CostObject with tokens=0, which prevents
+    token consumption during tracker.consume(proposal.expected_cost). After the
+    fix, schedulers should compute estimated token costs based on document lengths
+    and strategy-specific prompt overhead.
     """
-    from ragtune.components.schedulers import ActiveLearningScheduler, GracefulDegradationScheduler
+    from ragtune.components.schedulers import ActiveLearningScheduler
     from ragtune.core.pool import CandidatePool
 
     pool = CandidatePool()
     for i in range(5):
         pool.add_items([
-            ScoredDocument(id=f"doc_{i}", content=f"doc {i}", score=1.0 - i * 0.1)
+            ScoredDocument(id=f"doc_{i}", content=f"doc content {i}", score=1.0 - i * 0.1)
         ], source="original")
-
     pool.apply_priorities({f"doc_{i}": 1.0 - i * 0.1 for i in range(5)})
 
     budget = RemainingBudgetView(remaining_tokens=100, remaining_rerank_docs=10, remaining_rerank_calls=5)
+    scheduler = ActiveLearningScheduler(batch_size=2)
+    proposal = scheduler.select_batch(pool, budget)
+    assert proposal is not None
 
-    scheduler1 = ActiveLearningScheduler(batch_size=2)
-    proposal1 = scheduler1.select_batch(pool, budget)
-    assert proposal1 is not None
-    assert proposal1.expected_cost.tokens == 0, (
-        f"ActiveLearningScheduler creates CostObject with tokens={proposal1.expected_cost.tokens}, "
-        "not a per-batch token estimate. Tokens cannot be consumed during the loop."
+    assert proposal.expected_cost.tokens > 0, (
+        f"Schedulers should estimate per-batch token cost, but "
+        f"expected_cost.tokens={proposal.expected_cost.tokens}. "
+        "Token estimation in schedulers is required for budget-aware "
+        "loop control (refs #1)."
     )
-    assert proposal1.expected_cost.docs == 2
-    assert proposal1.expected_cost.calls == 1
-
-    scheduler2 = GracefulDegradationScheduler(batch_size=3)
-    proposal2 = scheduler2.select_batch(pool, budget)
-    if proposal2 is not None:
-        assert proposal2.expected_cost.tokens == 0, (
-            f"GracefulDegradationScheduler creates CostObject with tokens={proposal2.expected_cost.tokens}"
-        )
 
 
 def test_cost_tracker_consume_skips_zero_tokens():
     """
-    Test that CostTracker.consume() does not accumulate tokens when cost.tokens=0.
+    Unit test verifying that CostTracker.consume() does not accumulate a cost
+    dimension when the corresponding CostObject field is zero.
 
-    This confirms the mechanism: consume() only calls try_consume("tokens", ...) when
-    cost.tokens > 0. Since schedulers always set tokens=0, tokens never accumulate.
+    This is correct behavior: consume() checks cost.tokens > 0 before calling
+    try_consume('tokens', ...). When token estimation is added to schedulers,
+    the non-zero tokens field will flow through consume() correctly.
     """
     budget = CostBudget(limits={"tokens": 100, "rerank_docs": 50, "rerank_calls": 10})
     tracker = CostTracker(budget, ControllerTrace())
