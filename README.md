@@ -1,7 +1,7 @@
 # RAGtune 🎛️
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-orange)]()
 
@@ -174,11 +174,15 @@ We welcome contributions! Please see our [Roadmap](docs/roadmap.md) to find open
 4.  Push to the Branch (`git push origin feature/AmazingFeature`)
 5.  Open a Pull Request
 
+By submitting a contribution, you agree to the project's
+[Contributor License Agreement](https://cla-assistant.io/avishekanand/sir),
+which is required before any pull request can be merged.
+
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. See `pyproject.toml` for details.
+Distributed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) for details.
 
 ---
 
