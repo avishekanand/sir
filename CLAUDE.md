@@ -94,6 +94,23 @@ ConfigLoader singleton (`src/ragtune/utils/config.py`) provides access via dot n
 - Fixtures in `tests/conftest.py`
 - Test files mirror module paths: `src/ragtune/core/pool.py` → `tests/unit/core/test_pool.py`
 
+## PR & Code Review Conventions
+
+When opening or reviewing PRs in this repo, enforce these rules (full text in the project wiki page "PR & Code Review Guidelines"):
+
+1. **One PR = one problem.** No mixed refactor + feature, no drive-by edits to unrelated files. Open a new Issue for anything discovered along the way.
+2. **PR description is mandatory** and must answer the four questions:
+   - What problem does this solve? (link Issue + spec)
+   - What changed and why? (design choices)
+   - How was it tested? (paste pytest output, list test names)
+   - What should the reviewer focus on?
+3. **Size matters.** <200 ideal, 200–300 acceptable, 300–500 must justify, >500 split. No exceptions for the >500 line.
+4. **Tests travel with code.** New component → unit test. Modified controller/adapter → integration test. Budget/cost logic → budget-exhaustion edge case test (required). CLI change → smoke test via `make run-*`. Use fakes from `tests/conftest.py`; never real API calls in unit tests.
+5. **Reviewer comments use prefixes:** `[block]`, `[nit]`, `[question]`, `[idea]`. Only `[block]` gates approval.
+6. **Branch names signal scope:** `feat/...`, `fix/...`, `docs/...`, `bench/...`, `test/...`, `refactor/...`.
+7. **Commit format:** `<type>(<scope>): <imperative description>` — same prefix vocabulary as branches. One commit per logical change.
+8. **Spec precedes code.** Any new component, integration, or significant behavior change requires a spec merged into `specs/` *before* the implementation PR. Exception: `fix/` branches on existing well-understood components.
+
 ## See Also
 
 See `AGENTS.md` for coding style, naming conventions, commit guidelines, and PR process.
