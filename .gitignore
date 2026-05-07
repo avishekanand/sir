@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 data/bright_sample/
+data/indices/
+results/
 # Ignore benchmarks output if any
 *.log
 ragtune_config.yaml

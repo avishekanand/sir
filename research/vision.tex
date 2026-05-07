@@ -1,0 +1,160 @@
+% rag-tune-report.tex
+\documentclass[11pt,a4paper]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\title{Self-improving Cost-aware Retrieval-Augmented Generation (RAG):\\
+A Compute Allocation Perspective}
+\author{(Your Name / Group)}
+\date{March 5, 2026}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!5}
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report conceptualises a research direction for self-improving, cost-aware
+retrieval-augmented generation (RAG) systems. The central idea is to model a RAG
+pipeline as a budgeted sequential decision problem with multiple compute knobs
+(reformulation, retrieval, reranking, fusion, reasoning, verification). We propose:
+(i) component-level scaling plots per workload; (ii) a learned controller that
+allocates compute under constraints; (iii) instrumentation and replay/OPE for safe
+self-improvement; (iv) an evaluation suite and experimental matrix; and (v) a
+prototype architecture (“RAGtune”) as a RAG control plane.
+\end{abstract}
+
+\section{Executive summary}
+RAG combines parametric generation with non-parametric retrieval to improve
+knowledge-intensive tasks and provide provenance \cite{Lewis2020RAG}.
+Industry RAG faces hard constraints: token budgets, latency SLOs, governance,
+and explicit per-token pricing \cite{AzureAISearchRAG2026,AWSBedrockPricing,VertexGenAIPricing}.
+This motivates treating RAG as compute allocation: choose which component to
+scale for the next marginal gain (vs always scaling the reasoner).
+
+\section{Motivation and industrial relevance}
+Scaling laws show predictable improvements with training compute/model size
+\cite{Kaplan2020Scaling,Hoffmann2022Chinchilla}, but retrieval augmentation can
+substitute for parameter scaling in some regimes \cite{Borgeaud2022RETRO}.
+Cloud vendors ship managed RAG building blocks and explicitly document token,
+latency, and governance challenges \cite{AWSBedrockKB,VertexRAGOverview,AzureAISearchRAG2026}.
+
+\section{Literature and ecosystem survey}
+\subsection{Core RAG, retrieval, fusion, reranking}
+Canonical methods: RAG \cite{Lewis2020RAG}, DPR \cite{Karpukhin2020DPR},
+FiD \cite{Izacard2021FiD}, MonoT5 reranking \cite{Nogueira2020MonoT5},
+late interaction (ColBERT) \cite{Khattab2020ColBERT}, and heterogeneous retrieval
+benchmarking (BEIR) \cite{Thakur2021BEIR}.
+
+\subsection{Reformulation and fusion}
+HyDE reformulates via hypothetical document generation \cite{Gao2022HyDE}.
+Multi-run fusion can use Reciprocal Rank Fusion \cite{Cormack2009RRF}.
+
+\subsection{Adaptive retrieval, robustness, evaluation}
+Adaptive retrieval and gating: Self-RAG \cite{Asai2024SelfRAG}, RetrievalQA \cite{Zhang2024RetrievalQA},
+and uncertainty-to-retrieval analysis \cite{Ni2024WhenRetrieval}.
+Robustness to irrelevant context \cite{Yoran2024RobustRAG}.
+Retrieval evaluation aligned to downstream performance: eRAG \cite{Salemi2024ERAG}.
+
+\subsection{Cost-aware inference}
+FrugalGPT illustrates cost-aware cascades/routing over LLM APIs \cite{Chen2023FrugalGPT} and
+motivates analogous controllers over pipeline knobs.
+
+\subsection{Industrial products}
+Managed RAG: Bedrock Knowledge Bases \cite{AWSBedrockKB}, Vertex AI RAG Engine \cite{VertexRAGOverview},
+Azure AI Search RAG/agentic retrieval \cite{AzureAISearchRAG2026}.
+Ecosystem tools: LangChain \cite{LangChainRetrieval}, LlamaIndex \cite{LlamaIndexRAG},
+vector DB docs \cite{WeaviateRAG,PineconeRAGChatbot}.
+
+\section{Component-level scaling plots}
+Define knobs $\mathbf{k}=(k_{ref},k_{ret},k_{rer},k_{fus},k_{rea},k_{ver})$ and
+performance/cost:
+\begin{equation}
+\mathrm{Perf}=f(\mathbf{k};w), \quad \mathrm{Cost}=g(\mathbf{k};w).
+\end{equation}
+FiD provides linear scaling in \#passages fused \cite{Izacard2021FiD}.
+Reranking cost scales with \#query--doc pairs scored (MonoT5) \cite{Nogueira2020MonoT5}.
+Reasoning can scale at test time via sampling/search (self-consistency, ToT) \cite{Wang2022SelfConsistency,Yao2023ToT}.
+
+\subsection{Example plot (illustrative)}
+Figure~\ref{fig:example-curves} is a placeholder sketch; empirical curves are to be measured per workload.
+
+\begin{figure}[ht]
+\centering
+% Replace with an actual plot produced from measurement logs.
+\fbox{\parbox{0.85\linewidth}{
+\centering
+\textbf{Placeholder: example scaling curves}\\
+Performance vs Cost for reformulation / reranking / reasoning\\
+(Generate from logs; do not hard-code.)}}
+\caption{Example scaling curves (placeholder).}
+\label{fig:example-curves}
+\end{figure}
+
+\section{Estimating curves per workload}
+Use structured knob sweeps and proxy evaluation (eRAG) to reduce evaluation cost \cite{Salemi2024ERAG}.
+Account for retrieval infrastructure (ANN): FAISS \cite{Johnson2017FAISS} and HNSW \cite{Malkov2016HNSW}.
+Measure robustness because retrieval can hurt \cite{Yoran2024RobustRAG}.
+
+\section{Scheduler/controller formalisation}
+Let the controller choose actions $a_t$ given state $s_t$ under budgets.
+Learn policies with contextual bandits and offline evaluation.
+Theoretical foundations: unbiased LTR from biased feedback \cite{Joachims2017UnbiasedLTR},
+doubly robust OPE \cite{Dudik2011DoublyRobust,Dudik2014DROptim}, contextual-bandit online LTR \cite{Li2019ContextualBanditLTR}.
+
+\subsection{Mermaid flowchart (source)}
+% You can render Mermaid to PDF/SVG via mermaid-cli and include it as a figure.
+% Mermaid URL placeholder (render locally): https://mermaid.js.org/
+\begin{lstlisting}
+flowchart TD
+  A[Start: new query] --> B{Risk tier / compliance?}
+  B -->|High| C[Enable citations + verifier budget]
+  B -->|Normal| D[Default budgets]
+  C --> E[Initial retrieval (small k)]
+  D --> E
+  E --> F{Evidence quality OK?}
+  F -->|No| G[Reformulate / decompose]
+  G --> H[Retrieve again or increase k]
+  H --> I[Optional rerank deeper]
+  F -->|Yes| I[Optional rerank]
+  I --> J{Need multi-hop / synthesis?}
+  J -->|Yes| K[Increase fusion passages or reasoning compute]
+  J -->|No| L[Use SLM / low compute]
+  K --> M[Generate answer]
+  L --> M
+  M --> N{Verifier passes?}
+  N -->|Fail| O[Escalate: more evidence or bigger reasoner]
+  N -->|Pass| P[Return final + citations]
+  O --> E
+\end{lstlisting}
+
+\section{Instrumentation and self-improvement loop}
+Log full trajectories for replay and OPE; store propensities for exploration.
+Use proxy signals: eRAG doc utility \cite{Salemi2024ERAG}, factuality via FActScore \cite{Min2023FActScore},
+claim verification via FEVER \cite{Thorne2018FEVER}, sampling-based hallucination detection \cite{Manakul2023SelfCheckGPT}.
+
+\section{Evaluation suite and experiments}
+Benchmarks: KILT \cite{Petroni2021KILT}, BEIR \cite{Thakur2021BEIR}, RetrievalQA \cite{Zhang2024RetrievalQA},
+robustness to irrelevant context \cite{Yoran2024RobustRAG}.
+Report Pareto frontiers and cost-to-target metrics (quality at budget, budget for target quality).
+
+\section{RAGtune prototype design and roadmap}
+RAGtune is a RAG control plane: component registry, policy runtime, observability store, offline optimiser,
+Pareto compiler, and dashboards. Integrate with managed backends: Bedrock KB \cite{AWSBedrockKB},
+Vertex RAG Engine \cite{VertexRAGOverview}, Azure AI Search \cite{AzureAISearchRAG2026}.
+
+\bibliographystyle{plain}
+\bibliography{rag-tune-report}
+
+\end{document}
