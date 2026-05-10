@@ -113,7 +113,8 @@ def build_retriever(
     print_step(f"Indexing {len(lc_docs)} documents (gold pool: {len(gold_ids)})...")
     embeddings = HuggingFaceEmbeddings(
         model_name=embed_model,
-        encode_kwargs={"batch_size": 128, "show_progress_bar": True},
+        show_progress=True,
+        encode_kwargs={"batch_size": 128},
     )
     vectorstore = FAISS.from_documents(lc_docs, embeddings)
     retriever = LangChainRetriever(
