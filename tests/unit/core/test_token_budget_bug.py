@@ -3,24 +3,41 @@ Tests for token budget misintegration in the RAGtune iterative loop (refs #1).
 
 These tests verify that the token budget dimension is properly integrated into
 the iterative reranking loop. Tests that assert desired behavior are marked
-xfail(strict=True) because the current implementation consumes tokens only
-during assembly, not during the iterative loop itself. When the bug is fixed,
-these tests will start passing (XPASS), signalling that the xfail markers
-should be removed.
+xfail because the current implementation consumes tokens only during assembly,
+not during the iterative loop itself. Tests 2 and 5 use strict=False since the
+exact fix mechanism (Option A/B/C/D in issue #1) is not yet settled and their
+assertions may need adjustment depending on which option is chosen. Tests 3, 4,
+and 6 use strict=True because they encode invariants that any reasonable fix
+must satisfy. When the bug is fixed, xfail tests will start passing (XPASS),
+signalling that the xfail markers should be removed.
 """
+
 import pytest
 from typing import List, Optional
 from ragtune.core.controller import RAGtuneController
-from ragtune.core.types import ScoredDocument, RAGtuneContext, CostObject, EstimatorOutput
-from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseScheduler, BaseEstimator
+from ragtune.core.types import (
+    ScoredDocument,
+    RAGtuneContext,
+    CostObject,
+    EstimatorOutput,
+)
+from ragtune.core.interfaces import (
+    BaseRetriever,
+    BaseReformulator,
+    BaseReranker,
+    BaseScheduler,
+    BaseEstimator,
+)
 from ragtune.core.budget import CostBudget, CostTracker
 from ragtune.core.pool import CandidatePool
 from ragtune.core.types import ControllerTrace, BatchProposal, RemainingBudgetView
 from ragtune.components.assemblers import GreedyAssembler
+from ragtune.components.reformulators import IdentityReformulator
 
 
 class ManyDocRetriever(BaseRetriever):
     """Retriever that returns N documents, each with estimated token_count in metadata."""
+
     def __init__(self, n_docs: int = 20, tokens_per_doc: int = 20):
         self.n_docs = n_docs
         self.tokens_per_doc = tokens_per_doc
@@ -31,25 +48,25 @@ class ManyDocRetriever(BaseRetriever):
                 id=f"doc_{i}",
                 content=f"Document {i} about machine learning topics",
                 score=1.0 - (i * 0.05),
-                metadata={"token_count": self.tokens_per_doc}
+                metadata={"token_count": self.tokens_per_doc},
             )
             for i in range(self.n_docs)
         ]
 
 
-class IdentityReformulator(BaseReformulator):
-    def generate(self, context: RAGtuneContext) -> List[str]:
-        context.tracker.try_consume_reformulation()
-        return []
-
-
 class CountingReranker(BaseReranker):
     """Reranker that tracks how many times it was called, using instance state."""
+
     def __init__(self):
         self.call_count = 0
         self.batch_sizes: List[int] = []
 
-    def rerank(self, documents: List[ScoredDocument], context: RAGtuneContext, strategy: Optional[str] = None) -> dict:
+    def rerank(
+        self,
+        documents: List[ScoredDocument],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> dict:
         self.call_count += 1
         self.batch_sizes.append(len(documents))
         return {doc.doc_id: doc.final_score() + 0.1 for doc in documents}
@@ -57,23 +74,29 @@ class CountingReranker(BaseReranker):
 
 class CountingScheduler(BaseScheduler):
     """Scheduler that selects batches of fixed size until budget exhausted."""
+
     def __init__(self, batch_size: int = 5):
         self.batch_size = batch_size
 
-    def select_batch(self, pool: CandidatePool, budget: RemainingBudgetView) -> Optional[BatchProposal]:
+    def select_batch(
+        self, pool: CandidatePool, budget: RemainingBudgetView
+    ) -> Optional[BatchProposal]:
         eligible = pool.get_eligible()
         if not eligible or budget.remaining_rerank_docs <= 0:
             return None
-        batch = eligible[: min(self.batch_size, budget.remaining_rerank_docs, len(eligible))]
+        batch = eligible[
+            : min(self.batch_size, budget.remaining_rerank_docs, len(eligible))
+        ]
         return BatchProposal(
             doc_ids=[item.doc_id for item in batch],
             strategy="noop",
-            expected_cost=CostObject(docs=len(batch), calls=1)
+            expected_cost=CostObject(docs=len(batch), calls=1),
         )
 
 
 class TestEstimator(BaseEstimator):
     """Simple baseline estimator for testing."""
+
     def value(self, pool: CandidatePool, context: RAGtuneContext) -> dict:
         return {
             item.doc_id: EstimatorOutput(priority=max(item.sources.values()))
@@ -97,11 +120,13 @@ def test_token_budget_zero_prevents_all_reranking():
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=5),
         estimator=TestEstimator(),
-        budget=CostBudget(limits={
-            "tokens": 0,
-            "rerank_docs": 50,
-            "rerank_calls": 10,
-        }),
+        budget=CostBudget(
+            limits={
+                "tokens": 0,
+                "rerank_docs": 50,
+                "rerank_calls": 10,
+            }
+        ),
     )
 
     output = controller.run("test query")
@@ -113,10 +138,10 @@ def test_token_budget_zero_prevents_all_reranking():
 
 
 @pytest.mark.xfail(
-    strict=True,
+    strict=False,
     reason="Token budget not consumed during iterative loop (refs #1). "
-           "Currently tokens=3 does not limit reranking because tokens "
-           "are only consumed post-loop during assembly."
+    "Currently tokens=3 does not limit reranking because tokens "
+    "are only consumed post-loop during assembly.",
 )
 def test_positive_token_budget_limits_reranking_iterations():
     """
@@ -138,11 +163,13 @@ def test_positive_token_budget_limits_reranking_iterations():
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=4),
         estimator=TestEstimator(),
-        budget=CostBudget(limits={
-            "tokens": 3,
-            "rerank_docs": 20,
-            "rerank_calls": 10,
-        }),
+        budget=CostBudget(
+            limits={
+                "tokens": 3,
+                "rerank_docs": 20,
+                "rerank_calls": 10,
+            }
+        ),
     )
 
     output = controller.run("test query")
@@ -160,8 +187,8 @@ def test_positive_token_budget_limits_reranking_iterations():
 @pytest.mark.xfail(
     strict=True,
     reason="Token budget not consumed during iterative loop (refs #1). "
-           "The token budget should constrain reranking independently of "
-           "rerank_docs, but currently tokens and rerank_docs are decoupled."
+    "The token budget should constrain reranking independently of "
+    "rerank_docs, but currently tokens and rerank_docs are decoupled.",
 )
 def test_token_budget_constrains_reranking_before_docs_exhausted():
     """
@@ -180,11 +207,13 @@ def test_token_budget_constrains_reranking_before_docs_exhausted():
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=5),
         estimator=TestEstimator(),
-        budget=CostBudget(limits={
-            "tokens": 3,
-            "rerank_docs": 50,
-            "rerank_calls": 20,
-        }),
+        budget=CostBudget(
+            limits={
+                "tokens": 3,
+                "rerank_docs": 50,
+                "rerank_calls": 20,
+            }
+        ),
     )
 
     output = controller.run("test query")
@@ -202,8 +231,8 @@ def test_token_budget_constrains_reranking_before_docs_exhausted():
 @pytest.mark.xfail(
     strict=True,
     reason="Token budget not consumed during iterative loop (refs #1). "
-           "Tokens should accumulate via tracker.consume() during the loop, "
-           "not just via try_consume_tokens() during assembly."
+    "Tokens should accumulate via tracker.consume() during the loop, "
+    "not just via try_consume_tokens() during assembly.",
 )
 def test_tokens_consumed_during_loop_not_just_assembly():
     """
@@ -223,11 +252,13 @@ def test_tokens_consumed_during_loop_not_just_assembly():
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=3),
         estimator=TestEstimator(),
-        budget=CostBudget(limits={
-            "tokens": 1000,
-            "rerank_docs": 50,
-            "rerank_calls": 10,
-        }),
+        budget=CostBudget(
+            limits={
+                "tokens": 1000,
+                "rerank_docs": 50,
+                "rerank_calls": 10,
+            }
+        ),
     )
 
     output = controller.run("test query")
@@ -248,10 +279,10 @@ def test_tokens_consumed_during_loop_not_just_assembly():
 
 
 @pytest.mark.xfail(
-    strict=True,
+    strict=False,
     reason="Token budget not consumed during iterative loop (refs #1). "
-           "The loop should not perform reranking work that cannot produce "
-           "useful output due to token exhaustion."
+    "The loop should not perform reranking work that cannot produce "
+    "useful output due to token exhaustion.",
 )
 def test_low_token_budget_prevents_wasted_reranking():
     """
@@ -272,11 +303,13 @@ def test_low_token_budget_prevents_wasted_reranking():
         assembler=GreedyAssembler(),
         scheduler=CountingScheduler(batch_size=5),
         estimator=TestEstimator(),
-        budget=CostBudget(limits={
-            "tokens": 1,
-            "rerank_docs": 50,
-            "rerank_calls": 10,
-        }),
+        budget=CostBudget(
+            limits={
+                "tokens": 1,
+                "rerank_docs": 50,
+                "rerank_calls": 10,
+            }
+        ),
     )
 
     output = controller.run("test query")
@@ -294,8 +327,8 @@ def test_low_token_budget_prevents_wasted_reranking():
 @pytest.mark.xfail(
     strict=True,
     reason="Schedulers do not populate per-batch token estimates (refs #1). "
-           "BatchProposal.expected_cost.tokens should reflect estimated token "
-           "consumption for the selected batch to allow token-aware scheduling."
+    "BatchProposal.expected_cost.tokens should reflect estimated token "
+    "consumption for the selected batch to allow token-aware scheduling.",
 )
 def test_schedulers_provide_per_batch_token_estimates():
     """
@@ -307,16 +340,22 @@ def test_schedulers_provide_per_batch_token_estimates():
     and strategy-specific prompt overhead.
     """
     from ragtune.components.schedulers import ActiveLearningScheduler
-    from ragtune.core.pool import CandidatePool
 
     pool = CandidatePool()
     for i in range(5):
-        pool.add_items([
-            ScoredDocument(id=f"doc_{i}", content=f"doc content {i}", score=1.0 - i * 0.1)
-        ], source="original")
+        pool.add_items(
+            [
+                ScoredDocument(
+                    id=f"doc_{i}", content=f"doc content {i}", score=1.0 - i * 0.1
+                )
+            ],
+            source="original",
+        )
     pool.apply_priorities({f"doc_{i}": 1.0 - i * 0.1 for i in range(5)})
 
-    budget = RemainingBudgetView(remaining_tokens=100, remaining_rerank_docs=10, remaining_rerank_calls=5)
+    budget = RemainingBudgetView(
+        remaining_tokens=100, remaining_rerank_docs=10, remaining_rerank_calls=5
+    )
     scheduler = ActiveLearningScheduler(batch_size=2)
     proposal = scheduler.select_batch(pool, budget)
     assert proposal is not None
