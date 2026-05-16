@@ -1,13 +1,14 @@
+---
+spec_id: BENCH-001
+author: Shuvam Banerji Seal
+status: review
+component: benchmarks/
+issue: https://github.com/avishekanand/sir/issues/6
+related_papers: "FreshStack (2504.13128), BRIGHT"
+created: 2026-05-14
+---
+
 # Benchmark Infrastructure Restructuring
-
-## Status: Draft Proposal
-
-| Field | Value |
-|---|---|
-| Author | Shuvam Banerji Seal |
-| Created | 2026-05-14 |
-| Status | Draft / Discussion |
-| Depends on | None |
 
 ## 1. Motivation
 
@@ -89,6 +90,15 @@ merges global overrides, calls `benchmark.run(merged_config)`, and writes result
 new row in the SQLite database. Each row is keyed by `(commit_hash, timestamp)`, so
 multiple runs of the same benchmark are preserved rather than clobbered.
 
+**Benchmark discovery:** Each `include:` entry maps to a filesystem path relative to the
+`benchmarks/` directory. The runner imports `benchmark.py` from that path:
+- `trec-covid-budget-ablation` → `benchmarks/trec-covid-budget-ablation/benchmark.py`
+- `synthetic/loop_efficiency` → `benchmarks/synthetic/loop_efficiency/benchmark.py`
+
+Both flat (`benchmarks/<name>/`) and grouped (`benchmarks/<group>/<name>/`) layouts are
+supported. The `include:` value is the path after `benchmarks/`, using `/` separators for
+nested directories.
+
 ## 4. Benchmark Interface
 
 Every benchmark folder must expose a `run` function in its `benchmark.py` that conforms to this contract:
@@ -112,8 +122,11 @@ def run(config: dict) -> dict:
 ### 4.1 Required return keys
 
 The six metadata fields below are mandated by the project wiki's
-[Reproducibility Rules](https://github.com/avishekanand/sir/wiki/Reproducibility-Rules).
-Every benchmark result must contain all six — a result missing any field is incomplete.
+[CI & Benchmarking](https://github.com/avishekanand/sir/wiki/CI-and-Benchmarking) page
+("Benchmark Discipline — Six Required Fields"). These are distinct from the
+[Reproducibility Rules](https://github.com/avishekanand/sir/wiki/Reproducibility-Rules)
+fields used for experiment logs in `docs/experiments/`. Every benchmark result must
+contain all six — a result missing any field is incomplete.
 
 | Key | Type | Example |
 |---|---|---|
@@ -133,9 +146,9 @@ Every benchmark result must contain all six — a result missing any field is in
 | `results[].ndcg_at_5` | float | 0.85 |
 | `results[].latency_ms` | float | 312 |
 
-The runner writes these fields to the SQLite database. Per the wiki: "If another researcher
-cannot reproduce an experiment from the repository artifacts alone — the spec, the config,
-and the commit hash — the experiment is considered incomplete."
+The runner writes these fields to the SQLite database. Per the Reproducibility Rules wiki:
+"If another researcher cannot reproduce an experiment from the repository artifacts alone —
+the spec, the config, and the commit hash — the experiment is considered incomplete."
 
 ## 5. Migration Path
 
@@ -152,12 +165,16 @@ and the commit hash — the experiment is considered incomplete."
 | `tests/benchmarks/loop_efficiency.py` | `benchmarks/synthetic/loop_efficiency/` |
 | `tests/benchmarks/intelligence_gain.py` | `benchmarks/synthetic/intelligence_gain/` |
 
-**CI compatibility note:** The current fast CI pipeline runs `BENCH_FAST=1 pytest tests/benchmarks`.
-Moving synthetic benchmarks out of `tests/benchmarks/` will break this pipeline. Phase 1
-must either (a) keep a thin shim in `tests/benchmarks/` that imports from
-`benchmarks/synthetic/` for CI, or (b) update CI to call the new runner
-(`python benchmarks/core/runner.py --config benchmarks/config.yaml`) with a fast flag.
-This must be resolved in the implementation PR — the CI pipeline cannot break.
+**CI migration note:** The current fast CI pipeline runs `BENCH_FAST=1 pytest tests/benchmarks`.
+Moving synthetic benchmarks out of `tests/benchmarks/` will remove them from CI — this is
+intentional. Per review feedback, benchmarks must not run in CI (too slow and flaky).
+Phase 1 must:
+1. Remove `BENCH_FAST=1 pytest tests/benchmarks` from the CI pipeline.
+2. Update `make run-benchmarks` to call the new runner (`python benchmarks/core/runner.py`).
+3. Delete the old `tests/benchmarks/` directory after migration.
+
+The runner (`python benchmarks/core/runner.py`) becomes the sole entry point for all
+benchmark execution.
 
 ### 5.2 Initial benchmark folders to create
 
@@ -229,7 +246,44 @@ until a merge window opens to bring it into `main`.
 No changes to `benchmarks/core/` are required unless a new metric or output format is
 needed.
 
-## 7. Resolved Design Decisions
+## 7. Test Plan
+
+The following tests must be implemented in Phase 1 alongside the infrastructure:
+
+| Test file | Test function | What it verifies |
+|---|---|---|
+| `tests/unit/test_benchmark_runner.py` | `test_runner_discovers_flat_benchmarks` | Runner finds `benchmarks/<name>/benchmark.py` |
+| `tests/unit/test_benchmark_runner.py` | `test_runner_discovers_nested_benchmarks` | Runner finds `benchmarks/<group>/<name>/benchmark.py` |
+| `tests/unit/test_benchmark_runner.py` | `test_runner_merges_overrides` | Root config overrides are merged with per-benchmark config |
+| `tests/unit/test_benchmark_runner.py` | `test_runner_writes_to_sqlite` | Results are written as a new row in the database |
+| `tests/unit/test_benchmark_runner.py` | `test_runner_preserves_history` | Multiple runs of the same benchmark create separate rows |
+| `tests/unit/test_benchmark_db.py` | `test_db_schema_has_six_metadata_fields` | Runs table has all six required metadata columns |
+| `tests/unit/test_benchmark_db.py` | `test_db_query_by_commit_hash` | Results can be queried by commit hash |
+| `tests/unit/test_benchmark_metrics.py` | `test_ndcg_at_5_calculation` | NDCG@5 matches expected values on known inputs |
+| `tests/unit/test_benchmark_metrics.py` | `test_recall_at_5_calculation` | Recall@5 matches expected values on known inputs |
+
+All tests use synthetic data (no API calls, no real datasets). The existing synthetic
+benchmarks (`loop_efficiency`, `intelligence_gain`) serve as integration smoke tests.
+
+## 8. Out of Scope
+
+This spec does **not** cover:
+
+1. **CI pipeline redesign** — Benchmarks are removed from CI per this spec, but the
+   broader CI pipeline configuration (GitHub Actions workflows, other CI checks) is
+   not in scope.
+2. **Benchmark result visualization** — Reporting/query tools are in scope
+   (`benchmarks/core/reporting.py`), but dashboards, plots, or web UIs are not.
+3. **New benchmark implementations** — This spec defines the infrastructure. Specific
+   benchmarks (TREC-COVID, NFCorpus, BRIGHT) are migrated from existing code, not
+   newly implemented here.
+4. **Experiment logging system** — The `docs/experiments/` workflow (Reproducibility
+   Rules wiki) is a separate system. Benchmark results in SQLite do not replace
+   experiment logs.
+5. **GPU hardware provisioning** — The spec addresses how benchmarks signal GPU
+   requirements, not how GPU resources are provisioned or managed.
+
+## 9. Resolved Design Decisions
 
 These items were originally open questions and have been resolved (per review feedback):
 
@@ -241,11 +295,12 @@ These items were originally open questions and have been resolved (per review fe
    repository. All data is downloaded at runtime via HuggingFace datasets, ir_datasets,
    or a provided download script.
 
-3. **Metadata contract:** The six reproducibility metadata fields are:
+3. **Metadata contract:** The six benchmark metadata fields are:
    `commit_hash`, `dataset`, `config_file`, `random_seed`, `hardware`, `timestamp`.
-   These are columns in the SQLite runs table, mandated by the wiki's Reproducibility Rules.
+   These are columns in the SQLite runs table, mandated by the wiki's
+   [CI & Benchmarking](https://github.com/avishekanand/sir/wiki/CI-and-Benchmarking) page.
 
-## 8. Open Questions for Discussion
+## 10. Open Questions for Discussion
 
 1. Should the runner be a standalone script (`python benchmarks/core/runner.py --config benchmarks/config.yaml`) or integrated into the Makefile as `make run-benchmarks` (updated)? Both are possible; the Makefile target would call the runner internally.
 
