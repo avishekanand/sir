@@ -204,6 +204,8 @@ def evaluate(
 # --- Main ---
 
 def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneController]]:
+    # rerank_docs is the sole study variable. tokens and latency_ms are parked well
+    # above what any scenario will reach so they don't silently truncate results.
     assembler = GreedyAssembler(max_docs=CANDIDATES_TOP_K)
     return [
         (
@@ -215,7 +217,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=20),
                 estimator=BaselineEstimator(),
-                budget=CostBudget(max_reranker_docs=20),
+                budget=CostBudget.simple(docs=20, tokens=100_000, latency=600_000),
             ),
         ),
         (
@@ -227,7 +229,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=2),
                 estimator=SimilarityEstimator(),
-                budget=CostBudget(max_reranker_docs=10),
+                budget=CostBudget.simple(docs=10, tokens=100_000, latency=600_000),
             ),
         ),
         (
@@ -239,7 +241,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=5),
                 estimator=SimilarityEstimator(),
-                budget=CostBudget(max_reranker_docs=20),
+                budget=CostBudget.simple(docs=20, tokens=100_000, latency=600_000),
             ),
         ),
     ]
