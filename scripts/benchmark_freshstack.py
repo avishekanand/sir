@@ -30,6 +30,7 @@ from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.components.estimators import BaselineEstimator, SimilarityEstimator
+from ragtune.utils.config import config
 
 _console = Console()
 def print_header(msg): _console.print(f"[bold blue]{msg}[/bold blue]")
@@ -203,15 +204,15 @@ def evaluate(
 # --- Main ---
 
 def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneController]]:
-    reranker = CrossEncoderReranker(CROSS_ENCODER)
+    assembler = GreedyAssembler(max_docs=CANDIDATES_TOP_K)
     return [
         (
             "Static Rerank (budget=20)",
             RAGtuneController(
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
-                reranker=reranker,
-                assembler=GreedyAssembler(),
+                reranker=CrossEncoderReranker(CROSS_ENCODER),
+                assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=20),
                 estimator=BaselineEstimator(),
                 budget=CostBudget(max_reranker_docs=20),
@@ -222,8 +223,8 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
             RAGtuneController(
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
-                reranker=reranker,
-                assembler=GreedyAssembler(),
+                reranker=CrossEncoderReranker(CROSS_ENCODER),
+                assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=2),
                 estimator=SimilarityEstimator(),
                 budget=CostBudget(max_reranker_docs=10),
@@ -234,8 +235,8 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
             RAGtuneController(
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
-                reranker=reranker,
-                assembler=GreedyAssembler(),
+                reranker=CrossEncoderReranker(CROSS_ENCODER),
+                assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=5),
                 estimator=SimilarityEstimator(),
                 budget=CostBudget(max_reranker_docs=20),
@@ -245,6 +246,8 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
 
 
 def main():
+    config.set("retrieval.original_query_depth", CANDIDATES_TOP_K)
+
     print_header("RAGtune × FreshStack Benchmark")
     print_step(f"Domains: {DOMAINS}  |  Queries/domain: {QUERIES_PER_DOMAIN}  |  Candidates: {CANDIDATES_TOP_K}")
 
