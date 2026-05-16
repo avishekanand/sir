@@ -85,8 +85,15 @@ def load_data() -> Tuple[
     }
 
     # 2. Evaluation queries — capped at QUERIES_PER_RUN
+    # streaming=True avoids a schema-cast error caused by train.jsonl having an
+    # extra 'original_query' column absent from test.jsonl; streaming reads the
+    # target split lazily without unifying schemas across all files in the config.
     print_step(f"Loading evaluation queries (first {QUERIES_PER_RUN})...")
-    query_rows = list(load_dataset(DATASET_ID, "queries", split="test"))[:QUERIES_PER_RUN]
+    query_rows = []
+    for row in load_dataset(DATASET_ID, "queries", split="test", streaming=True):
+        query_rows.append(row)
+        if len(query_rows) >= QUERIES_PER_RUN:
+            break
     queries: Dict[str, str] = {row["id"]: row["query"] for row in query_rows}
 
     # 3. Qrels — load full test split, filter to our query subset
