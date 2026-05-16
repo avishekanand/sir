@@ -152,6 +152,13 @@ and the commit hash — the experiment is considered incomplete."
 | `tests/benchmarks/loop_efficiency.py` | `benchmarks/synthetic/loop_efficiency/` |
 | `tests/benchmarks/intelligence_gain.py` | `benchmarks/synthetic/intelligence_gain/` |
 
+**CI compatibility note:** The current fast CI pipeline runs `BENCH_FAST=1 pytest tests/benchmarks`.
+Moving synthetic benchmarks out of `tests/benchmarks/` will break this pipeline. Phase 1
+must either (a) keep a thin shim in `tests/benchmarks/` that imports from
+`benchmarks/synthetic/` for CI, or (b) update CI to call the new runner
+(`python benchmarks/core/runner.py --config benchmarks/config.yaml`) with a fast flag.
+This must be resolved in the implementation PR — the CI pipeline cannot break.
+
 ### 5.2 Initial benchmark folders to create
 
 1. **synthetic/loop_efficiency** (from `tests/benchmarks/loop_efficiency.py`)
@@ -188,9 +195,19 @@ New benchmarks use a two-stage merge workflow via a long-lived `benchmark` integ
 branch. This keeps unverified benchmark code off `main` without requiring CI for
 benchmarks (which are too slow and flaky for the CI pipeline).
 
+**Note:** This workflow applies to benchmark *implementation* PRs. Spec PRs for new
+benchmarks follow the standard lifecycle (spec branch → `main`), per the wiki's
+[Lifecycle of Work](https://github.com/avishekanand/sir/wiki/Lifecycle-of-Work).
+
+### Bootstrap
+
+The `benchmark` integration branch is created once by the PI (or project admin) from
+`main` and kept long-lived. It is never deleted — it accumulates validated benchmark code
+until a merge window opens to bring it into `main`.
+
 ### Branch workflow
 
-1. Fork the repository and create a branch from `benchmark` (not `main`).
+1. Fork the repository and create a feature branch from `benchmark` (not `main`).
 2. Under `benchmarks/`, create a new folder `benchmarks/<name>/` (or
    `benchmarks/<group>/<name>/` for grouped benchmarks like `synthetic/`).
 3. Add `benchmark.py` with a `run(config) -> dict` function.
@@ -212,19 +229,26 @@ benchmarks (which are too slow and flaky for the CI pipeline).
 No changes to `benchmarks/core/` are required unless a new metric or output format is
 needed.
 
-## 7. Open Questions for Discussion
+## 7. Resolved Design Decisions
+
+These items were originally open questions and have been resolved (per review feedback):
+
+1. **Storage format:** Results are stored in SQLite (`benchmarks/results.db`, gitignored),
+   not as committed JSON/CSV files. Each run is a row keyed by `(commit_hash, timestamp)`,
+   preserving full history without clobbering prior results.
+
+2. **Data commitment:** Benchmark data (qrels, corpora) is never committed to the
+   repository. All data is downloaded at runtime via HuggingFace datasets, ir_datasets,
+   or a provided download script.
+
+3. **Metadata contract:** The six reproducibility metadata fields are:
+   `commit_hash`, `dataset`, `config_file`, `random_seed`, `hardware`, `timestamp`.
+   These are columns in the SQLite runs table, mandated by the wiki's Reproducibility Rules.
+
+## 8. Open Questions for Discussion
 
 1. Should the runner be a standalone script (`python benchmarks/core/runner.py --config benchmarks/config.yaml`) or integrated into the Makefile as `make run-benchmarks` (updated)? Both are possible; the Makefile target would call the runner internally.
 
-2. **(Resolved)** Benchmark data and results are never committed. Data is downloaded at
-   runtime; results live in a local SQLite database (`benchmarks/results.db`, gitignored).
-   Each run is a row keyed by `(commit_hash, timestamp)`, preserving full history.
-
-3. How should GPU-dependent benchmarks (e.g., those requiring a cross-encoder or LLM)
+2. How should GPU-dependent benchmarks (e.g., those requiring a cross-encoder or LLM)
    signal their hardware requirements? Options include a `requires: gpu` field in each
    benchmark's `config.yaml` or a `skip_if_unavailable` mechanism in the runner.
-
-4. **(Resolved)** Results are stored in SQLite with a fixed schema, not as standalone
-   JSON/CSV files. The six reproducibility metadata fields (commit_hash, dataset,
-   config_file, random_seed, hardware, timestamp) are columns in the runs table.
-   Migration to a standard schema (e.g., MLCommons) is a future concern if needed.
