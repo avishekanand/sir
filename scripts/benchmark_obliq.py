@@ -88,7 +88,7 @@ def _parse_qrels(path: str, query_filter: Set[str]) -> Dict[str, Dict[str, int]]
     with open(path) as f:
         reader = csv.reader(f, delimiter="\t")
         for row in reader:
-            if len(row) < 3 or row[0] == "query_id":
+            if len(row) < 3 or row[0] == "query-id":
                 continue
             qid, did, score = row[0], row[1], int(row[2])
             if qid in query_filter and score > 0:
