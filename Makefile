@@ -4,7 +4,8 @@
 
 # This "macro" ensures that PYTHONVERBOSE is disabled even if set in your environment.
 # It suppresses the "# destroy" and "# cleanup" interpreter shutdown messages.
-PYTHON_CLEAN = PYTHONVERBOSE=0 venv/bin/python
+# Auto-detects venv location: .venv (uv default) or venv (pip default).
+PYTHON_CLEAN = PYTHONVERBOSE=0 $(shell test -f .venv/bin/python && echo .venv/bin/python || echo venv/bin/python)
 
 # Aliases for PyTerrier demo
 run-terrier: run-pyterrier
