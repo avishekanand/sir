@@ -1,6 +1,6 @@
 # RAGtune 🎛️
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-orange)]()
@@ -32,11 +32,20 @@ RAGtune introduces an **Active Learning Loop**:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/ragtune.git
-cd ragtune
+git clone https://github.com/avishekanand/sir.git
+cd sir
 
-# Install in editable mode
+# Install with uv (recommended — reproducible builds from lock file)
+uv sync
+uv sync --extra test     # Include test dependencies
+
+# Alternative: pip
 pip install -e .
+pip install -e ".[test]"
+
+# GPU users: install CUDA torch first, then sync
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+uv sync
 ```
 
 ---

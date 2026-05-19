@@ -7,7 +7,7 @@ authors = [
 description = "Budget-aware, iterative RAG middleware with active learning."
 readme = "README.md"
 license = { text="Apache-2.0" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.0.0",
     "tiktoken>=0.5.0",
@@ -28,6 +28,13 @@ dependencies = [
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pandas>=2.0.0",
+    "scipy>=1.10.0",
+]
+test-integration = [
+    "ragtune[test]",
+    "python-terrier>=0.10.0",
+    "ir_datasets>=0.5.0",
 ]
 
 [project.scripts]
@@ -36,6 +43,30 @@ ragtune = "ragtune.cli.main:main"
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+# Resolve torch from the CPU-only PyTorch index. This keeps the lock file
+# small (~180 MB) and CI-friendly. The lock file pins CPU torch for
+# reproducibility on developer machines and CI runners without GPUs.
+#
+# GPU users: install torch from the CUDA index BEFORE running `uv sync`.
+# uv will see torch is already satisfied and skip reinstallation.
+#
+#   CUDA 12.4:  uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   CUDA 11.8:  uv pip install torch --index-url https://download.pytorch.org/whl/cu118
+#   CPU only:   uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# After installing your preferred torch variant, run `uv sync` to install
+# the rest of the dependencies from the lock file.
+
+constraint-dependencies = ["yarl<1.24.0"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

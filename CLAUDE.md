@@ -5,8 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run Commands
 
 ```bash
-# Install
+# Install (recommended: uv for reproducible builds)
+uv sync                              # Install from lock file (CPU torch)
+uv sync --extra test                 # Include test dependencies
+
+# Alternative: pip (no lock file — versions may drift)
 pip install -e .
+pip install -e ".[test]"
+
+# GPU users: install CUDA torch first, then sync
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+uv sync
 
 # Run tests
 pytest                        # Full suite
