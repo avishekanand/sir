@@ -68,58 +68,65 @@ def setup_benchmark_pool(num_docs=100, num_golden=5):
 
 def run_bench(estimator_type="utility"):
     # Ensure all 100 docs enter the pool (default retrieval depth is 10)
+    # Save and restore config to avoid leaking singleton state (per Copilot review)
+    old_depth = config.get("retrieval.original_query_depth", 10)
+    old_pool = config.get("retrieval.max_pool_size", 50)
     config.set("retrieval.original_query_depth", 100)
     config.set("retrieval.max_pool_size", 100)
     
-    docs, golden_ids, embeddings_map = setup_benchmark_pool()
-    retriever = InMemoryRetriever(docs)
-    class FullRetriever(InMemoryRetriever):
-        def retrieve(self, query, top_k): return self.docs
-    retriever = FullRetriever(docs)
+    try:
+        docs, golden_ids, embeddings_map = setup_benchmark_pool()
+        retriever = InMemoryRetriever(docs)
+        class FullRetriever(InMemoryRetriever):
+            def retrieve(self, query, top_k): return self.docs
+        retriever = FullRetriever(docs)
 
-    # Setup Estimator
-    if estimator_type == "similarity":
-        estimator = SimilarityEstimator()
-        # Mock the internal model to return our simulated embeddings
-        mock_model = MagicMock()
-        def mock_encode(texts, **kwargs):
-            # Map text back to doc id (fragile but fine for bench)
-            # Content is "Content for [id]"
-            ids = [t.replace("Content for ", "") for t in texts]
-            return np.array([embeddings_map[did] for did in ids])
-        
-        mock_model.encode.side_effect = mock_encode
-        estimator.model = mock_model
-    else:
-        estimator = UtilityEstimator()
-
-    scheduler = ActiveLearningScheduler(batch_size=2)
-    controller = RAGtuneController(
-        retriever=retriever,
-        reformulator=IdentityReformulator(),
-        reranker=PerfectReranker(golden_ids),
-        assembler=GreedyAssembler(),
-        scheduler=scheduler,
-        estimator=estimator,
-        budget=CostBudget(max_reranker_docs=100)
-    )
-
-    output = controller.run("Find Golden")
-    
-    # Metrics
-    rerank_rounds = [e for e in output.trace.events if e.action == "rerank_batch"]
-    
-    # Find round where all golden found
-    found_count = 0
-    round_to_complete = -1
-    for i, r in enumerate(rerank_rounds):
-        batch_ids = r.details['doc_ids']
-        found_count += sum(1 for did in batch_ids if did in golden_ids)
-        if found_count >= len(golden_ids):
-            round_to_complete = i + 1
-            break
+        # Setup Estimator
+        if estimator_type == "similarity":
+            estimator = SimilarityEstimator()
+            # Mock the internal model to return our simulated embeddings
+            mock_model = MagicMock()
+            def mock_encode(texts, **kwargs):
+                # Map text back to doc id (fragile but fine for bench)
+                # Content is "Content for [id]"
+                ids = [t.replace("Content for ", "") for t in texts]
+                return np.array([embeddings_map[did] for did in ids])
             
-    return round_to_complete, len(rerank_rounds)
+            mock_model.encode.side_effect = mock_encode
+            estimator.model = mock_model
+        else:
+            estimator = UtilityEstimator()
+
+        scheduler = ActiveLearningScheduler(batch_size=2)
+        controller = RAGtuneController(
+            retriever=retriever,
+            reformulator=IdentityReformulator(),
+            reranker=PerfectReranker(golden_ids),
+            assembler=GreedyAssembler(),
+            scheduler=scheduler,
+            estimator=estimator,
+            budget=CostBudget(max_reranker_docs=100)
+        )
+
+        output = controller.run("Find Golden")
+        
+        # Metrics
+        rerank_rounds = [e for e in output.trace.events if e.action == "rerank_batch"]
+        
+        # Find round where all golden found
+        found_count = 0
+        round_to_complete = -1
+        for i, r in enumerate(rerank_rounds):
+            batch_ids = r.details['doc_ids']
+            found_count += sum(1 for did in batch_ids if did in golden_ids)
+            if found_count >= len(golden_ids):
+                round_to_complete = i + 1
+                break
+                
+        return round_to_complete, len(rerank_rounds)
+    finally:
+        config.set("retrieval.original_query_depth", old_depth)
+        config.set("retrieval.max_pool_size", old_pool)
 
 if __name__ == "__main__":
     print("=== RAGtune Intelligence Benchmark: Semantic Gain ===")
