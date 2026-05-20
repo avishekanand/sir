@@ -6,7 +6,7 @@ import random
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src")))
 
-from ragtune.core.types import ScoredDocument
+from ragtune.core.types import ScoredDocument, RAGtuneContext
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
 from ragtune.components.retrievers import InMemoryRetriever
@@ -14,21 +14,22 @@ from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.rerankers import BaseReranker
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
+from ragtune.components.estimators import BaselineEstimator
+from ragtune.utils.config import config
 
 class BenchmarkReranker(BaseReranker):
     """Simulates a reranker that recognizes a specific 'golden' section."""
     def __init__(self, golden_section: str):
         self.golden_section = golden_section
 
-    def rerank(self, documents: list[ScoredDocument], query: str) -> list[ScoredDocument]:
-        results = []
-        for doc in documents:
-            # High score if in golden section, low otherwise
-            score = 0.95 if doc.metadata.get("section") == self.golden_section else 0.2
-            results.append(doc.model_copy(update={"score": score, "reranker_score": score}))
-        return results
+    def rerank(self, documents, context: RAGtuneContext, strategy=None):
+        return {doc.doc_id: (0.95 if doc.metadata.get("section") == self.golden_section else 0.2) for doc in documents}
 
 def run_benchmark(num_docs=100, batch_size=2):
+    # Ensure all docs enter the pool (default retrieval depth is 10)
+    config.set("retrieval.original_query_depth", num_docs)
+    config.set("retrieval.max_pool_size", num_docs)
+    
     print(f"=== RAGtune Benchmarking: Loop Efficiency ===")
     print(f"Goal: Find all Golden Documents in a pool of {num_docs} docs efficiently.")
     print(f"Scenario: Golden docs are clustered in 'Section_4'.")
@@ -65,7 +66,8 @@ def run_benchmark(num_docs=100, batch_size=2):
         reranker=reranker,
         assembler=GreedyAssembler(),
         scheduler=scheduler,
-        budget=CostBudget(max_reranker_docs=num_docs)
+        estimator=BaselineEstimator(),
+        budget=CostBudget(limits={"rerank_docs": num_docs, "latency_ms": 30000.0})
     )
     
     # 3. Execution
@@ -94,7 +96,7 @@ def run_benchmark(num_docs=100, batch_size=2):
             last_golden_round = i + 1
             golden_docs_found += batch_golden
             
-        print(f"Round {i+1:2}: Batch={batch_ids} | Golden={batch_golden} | Utility={round_event.details['utility']:.2f}")
+        print(f"Round {i+1:2}: Batch={batch_ids} | Golden={batch_golden}")
 
     print(f"\nFinal Statistics:")
     print(f"- Total Docs in Pool: {num_docs}")

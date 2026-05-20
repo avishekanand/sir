@@ -21,18 +21,15 @@ from ragtune.components.rerankers import BaseReranker
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.components.estimators import UtilityEstimator, SimilarityEstimator
+from ragtune.utils.config import config
 
 class PerfectReranker(BaseReranker):
     """Signals 'Golden' docs with 0.95 and others with 0.2."""
     def __init__(self, golden_ids):
         self.golden_ids = set(golden_ids)
 
-    def rerank(self, documents, query):
-        results = []
-        for doc in documents:
-            score = 0.95 if doc.id in self.golden_ids else 0.2
-            results.append(doc.model_copy(update={"score": score, "reranker_score": score}))
-        return results
+    def rerank(self, documents, context, strategy=None):
+        return {doc.doc_id: (0.95 if doc.doc_id in self.golden_ids else 0.2) for doc in documents}
 
 def setup_benchmark_pool(num_docs=100, num_golden=5):
     """
@@ -70,6 +67,10 @@ def setup_benchmark_pool(num_docs=100, num_golden=5):
     return documents, golden_ids, embeddings
 
 def run_bench(estimator_type="utility"):
+    # Ensure all 100 docs enter the pool (default retrieval depth is 10)
+    config.set("retrieval.original_query_depth", 100)
+    config.set("retrieval.max_pool_size", 100)
+    
     docs, golden_ids, embeddings_map = setup_benchmark_pool()
     retriever = InMemoryRetriever(docs)
     class FullRetriever(InMemoryRetriever):
@@ -92,13 +93,14 @@ def run_bench(estimator_type="utility"):
     else:
         estimator = UtilityEstimator()
 
-    scheduler = ActiveLearningScheduler(batch_size=2, estimator=estimator)
+    scheduler = ActiveLearningScheduler(batch_size=2)
     controller = RAGtuneController(
         retriever=retriever,
         reformulator=IdentityReformulator(),
         reranker=PerfectReranker(golden_ids),
         assembler=GreedyAssembler(),
         scheduler=scheduler,
+        estimator=estimator,
         budget=CostBudget(max_reranker_docs=100)
     )
 
