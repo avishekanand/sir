@@ -560,13 +560,22 @@ def build_controller(
         }
     )
 
+    # Map experiment reranker names to scheduler strategy tokens
+    strategy_map = {
+        "monot5": "cross_encoder",
+        "cross-encoder": "cross_encoder",
+        "ollama": "llm",
+        "noop": "cross_encoder",
+    }
+    scheduler_strategy = strategy_map.get(exp.reranker, "cross_encoder")
+
     return RAGtuneController(
         retriever=retriever,
         reformulator=reformulator,
         reranker=reranker,
         assembler=GreedyAssembler(max_docs=20),
         scheduler=ActiveLearningScheduler(
-            batch_size=exp.batch_size, strategy=exp.reranker
+            batch_size=exp.batch_size, strategy=scheduler_strategy
         ),
         estimator=estimator,
         budget=budget,

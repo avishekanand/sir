@@ -144,11 +144,6 @@ def build_pyterrier_index(
     if meta is None:
         meta = {"docno": 128, "text": 4096}
 
-    indexer = pt.IterDictIndexer(index_path, overwrite=True, meta=meta)
-    if fields:
-        # fields=True enables field-aware retrieval (required for BM25)
-        pass  # Set via fields parameter in newer PyTerrier
-
     indexer_kwargs = {"overwrite": True, "meta": meta}
     if fields:
         indexer_kwargs["fields"] = True
@@ -182,9 +177,10 @@ def load_beir_dataset(dataset_id: str, n_queries: int = 50, doc_cap: int = 0):
     for qr in ds.qrels_iter():
         qrels[(qr.query_id, qr.doc_id)] = qr.relevance
 
+    relevant_qids = {qid for (qid, _), r in qrels.items() if r > 0}
     queries = []
     for q in ds.queries_iter():
-        if any(rel > 0 for (qid, _), rel in qrels.items() if qid == q.query_id):
+        if q.query_id in relevant_qids:
             queries.append({"id": q.query_id, "text": q.text})
         if len(queries) >= n_queries:
             break

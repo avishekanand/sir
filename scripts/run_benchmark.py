@@ -54,7 +54,13 @@ from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.components.estimators import BaselineEstimator, SimilarityEstimator
 from ragtune.utils.config import config
-from benchmark_utils import ndcg_at_k, recall_at_k, mrr, ndcg_at_k_from_ids
+from benchmark_utils import (
+    ndcg_at_k,
+    recall_at_k,
+    mrr,
+    ndcg_at_k_from_ids,
+    recall_at_k_from_ids,
+)
 
 config.set("retrieval.original_query_depth", 100)
 config.set("retrieval.max_pool_size", 200)
@@ -142,10 +148,11 @@ def run_fever():
     console.print("[dim]Loading FEVER (5.4M docs)...[/dim]")
     ds = ir_datasets.load("beir/fever/test")
     qrels = {(qr.query_id, qr.doc_id): qr.relevance for qr in ds.qrels_iter()}
+    relevant_qids = {qid for (qid, _), r in qrels.items() if r > 0}
     queries = [
         {"id": q.query_id, "text": q.text}
         for q in ds.queries_iter()
-        if any(r > 0 for (qid, _), r in qrels.items() if qid == q.query_id)
+        if q.query_id in relevant_qids
     ][:50]
     console.print(f"  {len(queries)} queries, {len(qrels)} qrels")
 
@@ -248,7 +255,7 @@ def run_cqadupstack():
                     :5
                 ]
                 ndcg = ndcg_at_k_from_ids(t5, qrels, q["id"], k=5)
-                recall = recall_at_k(t5, qrels, q["id"], k=5)
+                recall = recall_at_k_from_ids(t5, qrels, q["id"], k=5)
                 all_rows.append(
                     {
                         "subset": name,
