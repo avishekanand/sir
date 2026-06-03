@@ -7,6 +7,9 @@ from typing import List, Dict, Any, Optional
 
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.budget import CostBudget
+import pyterrier as pt
+pt.init(jvm_opts=["-Djava.io.tmpdir="+"/home/dsv/vevi4591/java_tmp", "-Dterrier.zstd.version=1.5.5-2"])
+
 from ragtune.adapters.pyterrier import PyTerrierRetriever
 from ragtune.components.rerankers import CrossEncoderReranker, OllamaListwiseReranker, SimulatedReranker
 from ragtune.components.reformulators import IdentityReformulator
@@ -123,6 +126,7 @@ def main():
                 reranker=CrossEncoderReranker("cross-encoder/ms-marco-MiniLM-L-6-v2"),
                 assembler=GreedyAssembler(),
                 scheduler=ActiveLearningScheduler(batch_size=20),
+                estimator=SimilarityEstimator(),
                 budget=CostBudget(max_reranker_docs=20)
             )
         ),
@@ -134,7 +138,8 @@ def main():
                 reformulator=IdentityReformulator(),
                 reranker=CrossEncoderReranker("cross-encoder/ms-marco-MiniLM-L-6-v2"),
                 assembler=GreedyAssembler(),
-                scheduler=ActiveLearningScheduler(batch_size=2, estimator=SimilarityEstimator()),
+                scheduler=ActiveLearningScheduler(batch_size=2),
+                estimator=SimilarityEstimator(),
                 budget=CostBudget(max_reranker_docs=10)
             )
         ),
@@ -146,7 +151,8 @@ def main():
                 reformulator=IdentityReformulator(),
                 reranker=CrossEncoderReranker("cross-encoder/ms-marco-MiniLM-L-6-v2"),
                 assembler=GreedyAssembler(),
-                scheduler=ActiveLearningScheduler(batch_size=5, estimator=SimilarityEstimator()),
+                scheduler=ActiveLearningScheduler(batch_size=5),
+                estimator=SimilarityEstimator(),
                 budget=CostBudget(max_reranker_docs=20)
             )
         ),
@@ -158,7 +164,8 @@ def main():
                 reformulator=IdentityReformulator(),
                 reranker=OllamaListwiseReranker(model_name="deepseek-r1:8b"),
                 assembler=GreedyAssembler(),
-                scheduler=ActiveLearningScheduler(batch_size=2, estimator=SimilarityEstimator()),
+                scheduler=ActiveLearningScheduler(batch_size=2),
+                estimator=SimilarityEstimator(),
                 budget=CostBudget(max_reranker_docs=4)
             )
         )
