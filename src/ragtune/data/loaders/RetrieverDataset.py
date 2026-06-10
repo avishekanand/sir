@@ -1,51 +1,115 @@
-#import configparser
-from typing import Dict, List
+"""
+RetrieverDataset
+================
+High-level dataset class that wraps a data loader and exposes the
+(queries, qrels, corpus) triple expected by retrieval evaluators.
 
-#from dexter.config.constants import Split
-from datastructures.context import Context
-from datastructures.question import Question
-from BaseDataLoader import PassageDataLoader
-from DataLoaderFactory import DataLoaderFactory
+This mirrors the DEXTER RetrieverDataset API so that SIR's evaluation
+pipeline can consume it without modification.
 
-#from dexter.data.loaders.Tokenizer import Tokenizer
+Usage
+-----
+    from src.ragtune.data.loaders.RetrieverDataset import RetrieverDataset
+    from src.ragtune.data.constants import Benchmark, Dataset, Split
+
+    rd = RetrieverDataset(
+        dataset=Dataset.BIOLOGY,
+        benchmark=Benchmark.BRIGHT,
+        split=Split.TEST,
+    )
+    queries, qrels, corpus = rd.qrels()
+"""
+
+import logging
+from typing import Dict, List, Optional, Tuple
+
+from src.ragtune.data.constants import Benchmark, Split
+from src.ragtune.data.datastructures import Query, Context
+from src.ragtune.data.loaders.DataLoaderFactory import DataLoaderFactory
+
+logger = logging.getLogger(__name__)
 
 
 class RetrieverDataset:
-    '''Dataset class to load the data of the corresponding dataset provided for the evaluation of retrieval.
-    Arguments
-    dataset (str): alias of dataset
-    passage_dataset (str): alias of corpus
-    config_path (str) : path to the configuration file containing various parameters
-    split (Split) : Split of the dataset to be loaded
-    batch_size (int) : batch size to process the dataset.
-     tokenzier (str) : name of the tokenizer model. Set tokenizer as None, if only samples to be loaded but not tokenized and stored. This can help save time if only the raw dataset is needed.
-    '''
-    def __init__(self, dataset:str,benchmark: str, source_type: str, passage_dataset:str,config_path,split:Split, batch_size=32,tokenizer="bert-base-uncased"):
+    """
+    High-level dataset wrapper for retrieval evaluation.
+
+    Parameters
+    ----------
+    dataset : str
+        Dataset / task name (e.g. 'biology', 'langchain').
+    benchmark : str
+        Benchmark name (Benchmark.BRIGHT | Benchmark.FRESHSTACK | Benchmark.BEIR).
+    split : str
+        Data split (Split.TEST | Split.TRAIN | Split.DEV).
+    long_context : bool
+        BRIGHT-specific: use long-context gold labels.
+    reasoning_subset : str | None
+        BRIGHT-specific: load reasoning-augmented queries.
+    cache_dir : str | None
+        HuggingFace cache directory.
+    extra_kwargs : dict
+        Additional kwargs forwarded to the loader factory.
+    """
+
+    def __init__(
+        self,
+        dataset: str,
+        benchmark: str,
+        split: str = Split.TEST,
+        long_context: bool = False,
+        reasoning_subset: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+        **extra_kwargs,
+    ):
+        self.dataset = dataset
+        self.benchmark = benchmark
         self.split = split
-        self.config = configparser.ConfigParser()
-        self.config.read(config_path)
-        self.tokenizer_name = tokenizer
-        # if(self.tokenizer_name):
-        #     self.tokenizer = Tokenizer(self.tokenizer_name)
-        # else:
-        #     self.tokenizer = None
-        self.passage_dataloader = PassageDataLoader(passage_dataset,None,self.tokenizer_name,config_path)
-        base_dataset = DataLoaderFactory().create_dataloader(dataset,benchmark, config_path=config_path, split=self.split, batch_size=batch_size,tokenizer=self.tokenizer_name,
-                                                             corpus=self.passage_dataloader.raw_data)
-        self.base_dataset = base_dataset          
-    
-    
-    def qrels(self)->(List[Question],Dict,List[Evidence]):
-        qrels = {}
-        queries = []
-        corpus = self.passage_dataloader.raw_data
-        
-        for sample in self.base_dataset.raw_data:
-            if str(sample.question.id()) not in list(qrels.keys()):
-                qrels[str(sample.question.id())] = {}
-                if(sample.question not in queries):
-                    queries.append(sample.question)
-            evidence = sample.evidences
-            #print("str(sample.idx)",str(sample.idx),str(evidence.id()),qrels[str(sample.idx)])
-            qrels[sample.question.id()][str(evidence.id())] = 1
-        return queries,qrels,corpus
+
+        self._loader = DataLoaderFactory().create_dataloader(
+            dataset_name=dataset,
+            benchmark_name=benchmark,
+            split=split,
+            long_context=long_context,
+            reasoning_subset=reasoning_subset,
+            cache_dir=cache_dir,
+            **extra_kwargs,
+        )
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def qrels(
+        self,
+    ) -> Tuple[List[Query], Dict[str, Dict[str, int]], Dict[str, Dict]]:
+        """
+        Returns (queries, qrels, corpus) in DEXTER / BEIR style.
+
+        Returns
+        -------
+        queries : List[Query]
+            Query objects with IDs.
+        qrels : Dict[str, Dict[str, int]]
+            {query_id: {doc_id: relevance_score}}
+        corpus : Dict[str, Dict]
+            {doc_id: {'text': ..., 'title': ...}}
+        """
+        queries = self._loader.get_query_objects()
+        qrels = self._loader.get_qrels()
+        corpus = self._loader.get_corpus()
+        return queries, qrels, corpus
+
+    def load(self):
+        """Alias: returns (corpus, queries_dict, qrels) matching BEIR GenericDataLoader."""
+        return self._loader.load()
+
+    def get_loader(self):
+        """Return the underlying BaseDataLoader."""
+        return self._loader
+
+    def __repr__(self):
+        return (
+            f"RetrieverDataset(benchmark={self.benchmark!r}, "
+            f"dataset={self.dataset!r}, split={self.split!r})"
+        )

@@ -3,30 +3,26 @@ from typing import List
 
 class Answer:
     """
-    A base class to hold all details about the answer aspect in question answering.
+    Holds answer details for question-answering tasks.
 
     Attributes:
         _text (str): The text of the answer.
-        _idx (int): The ID of the answer.
+        _idx (str | int | None): Optional ID.
     """
+
     def __init__(self, text: str, idx=None):
         self._text = text
         self._idx = idx
 
-    def text(self)->str:
+    def text(self) -> str:
         return self._text
 
     def id(self):
         return self._idx
 
-    def flatten(self)->List[str]:
-        """
-        Flattends the answer structure if complex into a simple list of answer texts.
-        """
+    def flatten(self) -> List[str]:
+        """Flatten complex answer structures to a list of strings."""
         return [self._text]
 
-    # def set_id(self, id):
-    #     self._id = id
-    #
-    # def set_attention_mask(self, attention_mask):
-    #     self.attention_mask = attention_mask
+    def __repr__(self):
+        return f"Answer(id={self._idx}, text={self._text[:60]!r})"

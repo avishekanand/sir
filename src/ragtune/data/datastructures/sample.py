@@ -1,22 +1,33 @@
 from typing import Optional
 
-from answer import Answer
-from context import Context
-from query import Query
+from src.ragtune.data.datastructures.answer import Answer
+from src.ragtune.data.datastructures.context import Context
+from src.ragtune.data.datastructures.query import Query
 
 
 class Sample:
     """
-    A base class to hold one datapoint/sample with a question ans its corresponding answer
+    Holds a single evaluation sample: a query with its corresponding
+    evidence document and optional answer.
 
     Attributes:
-        question (Question): question of the sample.
-        answer (Answer): answer of the given question.
-        context (Answer): Optional context/evidence for the given question.
-        _idx (int): The ID of the answer.
+        idx (str | int): Sample ID (usually the query ID).
+        query (Query): The query.
+        evidences (Context | None): A relevant document for this sample.
+        answer (Answer | None): Optional answer.
     """
-    def __init__(self, idx, query: Query, answer: Answer, evidences: Optional[Context] = None):
+
+    def __init__(
+        self,
+        idx,
+        query: Query,
+        evidences: Optional[Context] = None,
+        answer: Optional[Answer] = None,
+    ):
+        self.idx = idx
         self.query = query
         self.evidences = evidences
         self.answer = answer
-        self.idx = idx
+
+    def __repr__(self):
+        return f"Sample(idx={self.idx}, query={self.query!r})"
