@@ -29,8 +29,8 @@ Usage
 Deps
 ----
     pip install datasets pytrec_eval-terrier      # always required for online tests
-    pip install python-terrier                     # ⑨ and ⑩
-    pip install -e <sir_root>                      # ⑩  (installs ragtune from src/)
+    pip install python-terrier                     #
+    pip install -e <sir_root>                      #  (installs ragtune from src/)
 """
 
 import argparse
@@ -63,6 +63,11 @@ from src.ragtune.data.loaders import (
     RetrieverDataset, DataLoaderFactory,
 )
 from src.ragtune.evaluation import RetrievalEvaluator
+
+import pyterrier as pt
+
+pt.init(jvm_opts=["-Djava.io.tmpdir="+"/home/dsv/vevi4591/java_tmp", "-Dterrier.zstd.version=1.5.5-2"])
+
 
 
 # ---------------------------------------------------------------------------
@@ -707,7 +712,7 @@ def _build_pt_index(corpus: Dict, index_dir: str):
 
     indexer = pt.IterDictIndexer(
         index_dir, overwrite=True,
-        meta={"docno": 48, "text": 4096},
+        meta={"docno": 512, "text": 4096},
     )
     ref = indexer.index(_iter())
     return pt.IndexFactory.of(ref)

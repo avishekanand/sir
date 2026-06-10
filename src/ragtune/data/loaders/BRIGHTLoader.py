@@ -162,7 +162,6 @@ class BRIGHTLoader(BaseDataLoader):
             )
             logger.info(f"[BRIGHTLoader/HF] Corpus: {len(self._corpus)} docs")
 
-            # ---- Queries + qrels ----
             examples_subset = (
                 self.reasoning_subset or HFDatasets.BRIGHT_SUBSET_EXAMPLES
             )
