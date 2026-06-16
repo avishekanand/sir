@@ -16,4 +16,5 @@ pytest>=8.0.0
 pytest-asyncio>=0.23.0
 python-terrier>=0.10.0
 ir_datasets>=0.5.0
+datasets
 
