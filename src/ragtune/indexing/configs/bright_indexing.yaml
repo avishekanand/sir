@@ -1,0 +1,132 @@
+# ==============================================================================
+# BRIGHT Benchmark — Indexing Configuration
+#
+# This file is for index building only. It is consumed by:
+#   ragtune index src/ragtune/indexing/configs/bright_indexing.yaml
+#
+# Indexing rules enforced by IndexFactory.from_config():
+#   index.type = "sparse"  →  always PyTerrier BM25, no encoder required
+#   index.type = "dense"   →  backend + model.name are required
+#
+# Schema categories under `index:`
+#   data      — which corpus/queries to load (HuggingFace benchmark)
+#   type      — "sparse" | "dense"
+#   backend   — dense only: "faiss" | "numpy" | "flex"
+#   index_path — where the built index is written/loaded from
+#   model     — WHICH model (identity only: name)
+#   params    — HOW it runs (device, batch_size, max_length, use_fp16,
+#               pooling, prefixes, ...) — forwarded as-is to the resolved
+#               encoder; valid keys differ per backend/family.
+#
+# Pick ONE block under `index:` and leave the others commented out.
+# ==============================================================================
+
+index:
+
+  data:
+    benchmark: "BRIGHT"
+
+    # Choose one BRIGHT task:
+    #   biology | earth_science | economics | psychology | robotics
+    #   stackoverflow | sustainable_living | leetcode | pony | aops
+    #   theoremqa_questions | theoremqa_theorems
+    dataset: "biology"
+    split: "test"
+    # Set true to use long-context gold labels (gold_ids_long) for qrels.
+    long_context: false
+
+  # --------------------------------------------------------------------------
+  # Index type — pick ONE block below and uncomment it
+  # --------------------------------------------------------------------------
+
+  # ── OPTION A: Sparse (BM25 via PyTerrier) ──────────────────────────────────
+  # No model, no params. Fast to build, CPU-only.
+  # type: "sparse"
+  # index_path: "indexes/bright-biology-bm25"
+
+  # ── OPTION B: Dense — FAISS (sentence-transformers) ────────────────────────
+  # Any HuggingFace SentenceTransformer model ID works as model.name.
+  # type: "dense"
+  # backend: "faiss"
+  # index_path: "indexes/bright-biology-minilm"
+  # model:
+  #   name: "sentence-transformers/all-MiniLM-L6-v2"
+  # params:
+  #   device: "cuda"        # "cpu" | "cuda"
+  #   batch_size: 64
+
+  # ── OPTION B2: Dense — plain NumPy storage (no faiss-cpu dependency) ──────
+  # Exact brute-force search via matrix multiplication. Good for small/medium
+  # corpora or environments without faiss-cpu installed.
+  # type: "dense"
+  # backend: "numpy"
+  # index_path: "indexes/bright-biology-minilm-numpy"
+  # model:
+  #   name: "sentence-transformers/all-MiniLM-L6-v2"
+  # params:
+  #   device: "cuda"
+  #   batch_size: 64
+
+  # ── OPTION C: Dense — FlexIndex with Qwen3Encoder (ours, see
+  #             ragtune.indexing.encoders.qwen) ───────────────────────────
+  # Requires: pip install pyterrier-dr
+  #
+  # model.name is matched by family (any name containing "qwen3", case
+  # insensitive) so any checkpoint size routes to Qwen3Encoder — not just
+  # the bare shorthand "qwen3". Pick whichever size you need directly:
+  #   "qwen3"                          → default checkpoint (0.6B)
+  #   "Qwen/Qwen3-Embedding-0.6B"       → 0.6B, explicit
+  #   "Qwen/Qwen3-Embedding-4B"         → 4B
+  #   "Qwen/Qwen3-Embedding-8B"         → 8B
+  
+  type: "dense"
+  backend: "flex"
+  index_path: "indexes/bright-biology-qwen3-0.6b.flex"
+  model:
+    name: "Qwen/Qwen3-Embedding-0.6B"
+  params:
+    device: "cuda"          # "cpu" | "cuda"
+    batch_size: 32
+    max_length: 8192        # Qwen3 supports long context
+    use_fp16: true
+    # task_description: "Given a question, retrieve passages that answer it"
+
+
+  # ── OPTION D: Dense — FlexIndex with BGE-M3 (multi-vector) ────────────────
+  # BGE-M3 returns dense + sparse + ColBERT vectors simultaneously.
+  # type: "dense"
+  # backend: "flex"
+  # index_path: "indexes/bright-biology-bgem3"
+  # model:
+  #   name: "bge-m3"
+  # params:
+  #   device: "cuda"
+  #   batch_size: 16         # lower batch_size for large models on GPU
+  #   use_fp16: true
+
+  # ── OPTION E: Dense — FAISS with a large instruction-following model ────────
+  # type: "dense"
+  # backend: "faiss"
+  # index_path: "indexes/bright-biology-e5large"
+  # model:
+  #   name: "intfloat/e5-large-v2"
+  # params:
+  #   device: "cuda"
+  #   batch_size: 32
+
+  # ── OPTION F: Dense — FlexIndex with a raw HF model (GenericHFEncoder) ────
+  # Any HF model ID not matched as "bge-m3"/"tasb"/"ance"/"tct"/"qwen3"
+  # falls back to GenericHFEncoder — full control over pooling/prefixes.
+  # type: "dense"
+  # backend: "flex"
+  # index_path: "indexes/bright-biology-e5base"
+  # model:
+  #   name: "intfloat/e5-base-v2"
+  # params:
+  #   device: "cuda"
+  #   batch_size: 32
+  #   max_length: 256
+  #   pooling: "mean"            # "mean" | "cls" | "last_token"
+  #   query_prefix: "query: "
+  #   doc_prefix: "passage: "
+  #   normalize: true

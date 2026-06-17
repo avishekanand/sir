@@ -12,9 +12,34 @@ class DataConfig(BaseModel):
     text_field: str = "content"
     metadata_fields: List[str] = Field(default_factory=lambda: ["source"])
 
+class ModelConfig(BaseModel):
+    # HuggingFace model ID or pyterrier_dr shorthand
+    # (e.g. "sentence-transformers/all-MiniLM-L6-v2", "qwen3", "bge-m3").
+    # This is identity only — how it runs belongs in IndexConfig.params.
+    name: Optional[str] = None
+
 class IndexConfig(BaseModel):
-    framework: str
+    # "sparse" → always PyTerrier BM25 (no encoder needed)
+    # "dense"  → embedding-based; requires backend + model
     type: str = "sparse"
+
+    # Where the built index is written to (and loaded from).
+    index_path: str = "indexes/default"
+
+    # ── Dense-only fields ──────────────────────────────────────────────────
+    # Ignored when type = "sparse".
+
+    # Registry key for the dense backend: "faiss" | "flex"
+    backend: Optional[str] = None
+
+    # Which model to use (identity only).
+    model: Optional[ModelConfig] = None
+
+    # Runtime/behavior knobs forwarded as-is to the resolved encoder's
+    # constructor — valid keys differ per backend/family, e.g.:
+    #   common:        device, batch_size, max_length
+    #   Qwen3Encoder:   use_fp16, task_description, add_instruction_to_query
+    #   GenericHFEncoder: pooling, query_prefix, doc_prefix, fp16, normalize
     params: Dict[str, Any] = Field(default_factory=dict)
 
 class FeedbackConfig(BaseModel):

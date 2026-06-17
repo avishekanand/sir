@@ -12,3 +12,4 @@ ragtune_config.yaml
 .DS_Store
 proposals/
 .superpowers/
+indexes/

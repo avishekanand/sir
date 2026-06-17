@@ -1,79 +1,112 @@
+"""
+Sparse BM25 indexer via PyTerrier's IterDictIndexer.
+
+Takes a BEIR-style corpus dict (from any DataLoader) and builds a standard
+Terrier inverted index on disk.  The resulting index is compatible with
+PyTerrierRetriever in ragtune.adapters.pyterrier.
+
+Install
+-------
+    pip install python-terrier
+"""
+
 import os
-import pyterrier as pt
-from typing import Dict, Any
 from pathlib import Path
-from ragtune.core.interfaces import BaseIndexer
+from typing import Any, Dict, List
+
+try:
+    import pyterrier as pt
+except ImportError:
+    pt = None
+
+from ragtune.indexing.base import BaseIndexer, SearchResult
 from ragtune.registry import registry
+
 
 @registry.indexer("pyterrier")
 class PyTerrierIndexer(BaseIndexer):
-    """Indexer implementation using PyTerrier."""
-    
-    def build(self, collection_path: str, format: str, fields: Dict[str, str], **params) -> bool:
+    """
+    Builds a PyTerrier inverted index from a BEIR-style corpus dict.
+
+    Example
+    -------
+    >>> indexer = PyTerrierIndexer()
+    >>> indexer.build_from_corpus(corpus, index_path="indexes/biology-bm25")
+    >>> pt_index = indexer.load("indexes/biology-bm25")
+    >>> # Use with PyTerrierRetriever:
+    >>> retriever = PyTerrierRetriever(index_path="indexes/biology-bm25")
+    """
+
+    def build_from_corpus(
+        self, corpus: Dict[str, Dict], index_path: str, **params
+    ) -> bool:
+        """
+        Index a BEIR-style corpus dict with IterDictIndexer.
+
+        Parameters
+        ----------
+        corpus : dict
+            {doc_id: {"text": ..., "title": ...}}
+        index_path : str
+            Directory where the Terrier index is written.
+        """
+        if pt is None:
+            raise ImportError(
+                "python-terrier is required for PyTerrierIndexer: "
+                "pip install python-terrier"
+            )
         if not pt.started():
             pt.init()
-            
-        index_path = params.get("index_path")
-        if not index_path:
-            raise ValueError("index_path is required for PyTerrierIndexer")
-        
+
         index_path = os.path.abspath(index_path)
-            
-        # Create index dir if not exists
         os.makedirs(index_path, exist_ok=True)
-        
-        # JSON / JSONL indexing
-        import json
-        if format in ["json", "jsonl"]:
-            def iter_docs():
-                if format == "jsonl":
-                    with open(collection_path, "r") as f:
-                        for line in f:
-                            yield json.loads(line)
-                else:
-                    with open(collection_path, "r") as f:
-                        data = json.load(f)
-                        if isinstance(data, list):
-                            for doc in data:
-                                yield doc
-                        elif isinstance(data, dict):
-                            # Handle cases where the whole json is a dict (e.g. BRIGHT format if it's not a list)
-                            # But usually it's a list. Let's assume list for now or adapt if needed.
-                            yield data
 
-            def mapped_iter():
-                for doc in iter_docs():
-                    text_val = doc.get(fields.get("text_field", "text"))
-                    if text_val is None:
-                        text_val = ""
-                    
-                    yield {
-                        "docno": str(doc.get(fields.get("id_field", "doc_id"), "")),
-                        "text": str(text_val),
-                        **{k: doc.get(v) for k, v in fields.get("metadata_fields", {}).items() if k not in ["docno", "text"]}
-                    }
-            
-            docs_to_index = list(mapped_iter())
-            
-            indexer = pt.IterDictIndexer(index_path, overwrite=True)
-            indexer.index(docs_to_index)
+        def _iter_docs():
+            for doc_id, doc in corpus.items():
+                yield {
+                    "docno": str(doc_id),
+                    "text": str(doc.get("text", "")),
+                    "title": str(doc.get("title", "")),
+                }
 
-            # Verify index properties
-            try:
-                props_path = os.path.join(index_path, "data.properties")
-                if os.path.exists(props_path):
-                    with open(props_path, "r") as f:
-                        props = f.read()
-                        if "num.Pointers=0" in props:
-                            print(f"WARNING: Index built at {index_path} has 0 pointers. Inverted index may be missing.")
-            except Exception:
-                pass
-
-            return True
-        else:
-            raise NotImplementedError(f"Format {format} not yet supported in PyTerrierIndexer adapter")
+        indexer = pt.IterDictIndexer(
+            index_path,
+            overwrite=True,
+            meta={"docno": 5000, "text": 50000},
+        )
+        indexer.index(_iter_docs())
+        return True
 
     def exists(self, index_path: str) -> bool:
-        # PyTerrier index is usually a folder or a data.properties file
-        path = Path(index_path)
-        return path.exists() and (path.is_dir() or (path / "data.properties").exists())
+        p = Path(index_path)
+        return p.is_dir() and (p / "data.properties").exists()
+
+    def load(self, index_path: str) -> Any:
+        """Return a pt.IndexBase ready for BatchRetrieve / terrier.Retriever."""
+        if pt is None:
+            raise ImportError(
+                "python-terrier is required for PyTerrierIndexer: "
+                "pip install python-terrier"
+            )
+        if not pt.started():
+            pt.init()
+        return pt.IndexFactory.of(os.path.abspath(index_path))
+
+    def search(self, query: str, top_k: int, index_path: str, **params) -> List[SearchResult]:
+        """Run BM25 retrieval for a single query and return the top_k hits."""
+        if pt is None:
+            raise ImportError(
+                "python-terrier is required for PyTerrierIndexer: "
+                "pip install python-terrier"
+            )
+        if not pt.started():
+            pt.init()
+        import pandas as pd
+
+        bm25 = pt.terrier.Retriever(os.path.abspath(index_path), wmodel="BM25")
+        queries_df = pd.DataFrame([{"qid": "q1", "query": query}])
+        res = bm25.transform(queries_df).sort_values("score", ascending=False).head(top_k)
+        return [
+            SearchResult(doc_id=str(row["docno"]), score=float(row["score"]))
+            for _, row in res.iterrows()
+        ]
