@@ -17,7 +17,7 @@ indexer = IndexFactory.create("pyterrier")
 indexer.build_from_corpus(corpus, index_path="indexes/biology-bm25")
 
 # Query it
-results = indexer.search("what is bm25?", top_k=5, index_path="indexes/biology-bm25")
+results = indexer.search("Why do I only breathe out of one nostril?", top_k=5, index_path="indexes/biology-bm25")
 for r in results:
     print(r.doc_id, r.score)
 ```
@@ -26,7 +26,7 @@ Or via the YAML-driven script — see [`scripts/run_indexing.py`](../../../scrip
 
 ```bash
 python scripts/run_indexing.py src/ragtune/indexing/configs/bright_indexing.yaml \
-    --query "what is the role of mitochondria in apoptosis?" --top-k 5
+    --query "Why do I only breathe out of one nostril?" --top-k 5
 ```
 
 If the index already exists at `index_path`, the corpus is **not** re-downloaded and the build step is skipped — `--query` alone is enough to test retrieval against a previously built index.
