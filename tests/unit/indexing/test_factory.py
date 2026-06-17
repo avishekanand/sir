@@ -10,7 +10,7 @@ import ragtune.indexing  # noqa: F401
 
 from ragtune.indexing.factory import IndexFactory
 from ragtune.indexing.pyterrier_indexer import PyTerrierIndexer
-from ragtune.indexing.dense_indexer import FaissIndexer
+from ragtune.indexing.dense_indexer import FaissIndexer, NumpyIndexer
 from ragtune.indexing.flex_indexer import FlexIndexer
 from ragtune.indexing.pyserini_indexer import PyseriniIndexer
 
@@ -65,6 +65,20 @@ class TestIndexFactoryFromConfig:
 
         indexer = IndexFactory.from_config(mock_config)
         assert isinstance(indexer, FaissIndexer)
+        assert indexer.model_name_or_path == "my-model"
+        assert indexer.batch_size == 32
+
+    def test_dense_numpy_passes_model_name_or_path(self):
+        """Regression: numpy backend must use model_name_or_path, not model_name
+        (NumpyIndexer is a DenseIndexer subclass, like FaissIndexer — not FlexIndexer)."""
+        mock_config = MagicMock()
+        mock_config.type = "dense"
+        mock_config.backend = "numpy"
+        mock_config.model.name = "my-model"
+        mock_config.params = {"device": "cpu", "batch_size": 32}
+
+        indexer = IndexFactory.from_config(mock_config)
+        assert isinstance(indexer, NumpyIndexer)
         assert indexer.model_name_or_path == "my-model"
         assert indexer.batch_size == 32
 

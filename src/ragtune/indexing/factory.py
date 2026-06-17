@@ -74,8 +74,9 @@ class IndexFactory:
                 )
 
             kwargs = dict(index_config.params)
-            # FaissIndexer uses model_name_or_path; FlexIndexer uses model_name
-            if index_config.backend == "faiss":
+            # FaissIndexer/NumpyIndexer (DenseIndexer subclasses) use
+            # model_name_or_path; FlexIndexer uses model_name.
+            if index_config.backend in ("faiss", "numpy"):
                 kwargs["model_name_or_path"] = model_name
             else:
                 kwargs["model_name"] = model_name

@@ -58,14 +58,14 @@ index:
   # ── OPTION B2: Dense — plain NumPy storage (no faiss-cpu dependency) ──────
   # Exact brute-force search via matrix multiplication. Good for small/medium
   # corpora or environments without faiss-cpu installed.
-  # type: "dense"
-  # backend: "numpy"
-  # index_path: "indexes/bright-biology-minilm-numpy"
-  # model:
-  #   name: "sentence-transformers/all-MiniLM-L6-v2"
-  # params:
-  #   device: "cuda"
-  #   batch_size: 64
+  type: "dense"
+  backend: "numpy"
+  index_path: "indexes/bright-biology-minilm.numpy"
+  model:
+    name: "sentence-transformers/all-MiniLM-L6-v2"
+  params:
+    device: "cuda"
+    batch_size: 64
 
   # ── OPTION C: Dense — FlexIndex with Qwen3Encoder (ours, see
   #             ragtune.indexing.encoders.qwen) ───────────────────────────
@@ -79,16 +79,16 @@ index:
   #   "Qwen/Qwen3-Embedding-4B"         → 4B
   #   "Qwen/Qwen3-Embedding-8B"         → 8B
   
-  type: "dense"
-  backend: "flex"
-  index_path: "indexes/bright-biology-qwen3-0.6b.flex"
-  model:
-    name: "Qwen/Qwen3-Embedding-0.6B"
-  params:
-    device: "cuda"          # "cpu" | "cuda"
-    batch_size: 32
-    max_length: 8192        # Qwen3 supports long context
-    use_fp16: true
+  # type: "dense"
+  # backend: "flex"
+  # index_path: "indexes/bright-biology-qwen3-0.6b.flex"
+  # model:
+  #   name: "Qwen/Qwen3-Embedding-0.6B"
+  # params:
+  #   device: "cuda"          # "cpu" | "cuda"
+  #   batch_size: 32
+  #   max_length: 8192        # Qwen3 supports long context
+  #   use_fp16: true
     # task_description: "Given a question, retrieve passages that answer it"
 
 
