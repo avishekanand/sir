@@ -1,19 +1,51 @@
--e .
-pydantic>=2.0.0
-tiktoken>=0.5.0
-sentence-transformers>=3.0.0
-litellm>=1.0.0
-torch>=2.0.0
-numpy>=1.24.0
-langchain>=0.1.0
-langchain-community>=0.0.10
-langchain-huggingface>=0.0.1
-faiss-cpu>=1.7.4
-rich>=13.0.0
-typer>=0.9.0
-pyyaml>=6.0
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-python-terrier>=0.10.0
-ir_datasets>=0.5.0
+# RAGtune dependencies
+#
+# This file is a convenience for users who don't have uv.
+# For reproducible builds, use `uv sync` with the lock file instead.
+#
+# Format: package>=min  # tested: pinned_version
+#
+# To install:
+#   pip install -r requirements.txt
+#   pip install -e .
+#
+# To install with test dependencies:
+#   pip install -r requirements.txt
+#   pip install -e ".[test]"
 
+# ── Runtime ──────────────────────────────────────────────────────────────────
+
+pydantic>=2.0.0              # tested: 2.13.4
+tiktoken>=0.5.0              # tested: 0.13.0
+sentence-transformers>=2.2.0 # tested: 5.5.0
+litellm>=1.0.0               # tested: 1.83.0
+torch>=2.0.0                 # tested: 2.12.0 (CPU) — GPU users: see below
+numpy>=1.24.0                # tested: 2.4.4
+langchain>=0.1.0             # tested: 0.3.30
+langchain-community>=0.0.10  # tested: 0.3.27
+langchain-huggingface>=0.0.1 # tested: 0.3.1
+faiss-cpu>=1.7.4             # tested: 1.13.2
+rich>=13.0.0                 # tested: 15.0.0
+typer>=0.9.0                 # tested: 0.25.1
+pyyaml>=6.0                  # tested: 6.0.3
+
+# ── Test ─────────────────────────────────────────────────────────────────────
+
+pytest>=8.0.0                # tested: 9.0.3
+pytest-asyncio>=0.23.0       # tested: 1.3.0
+pandas>=2.0.0                # tested: 3.0.3
+scipy>=1.10.0                # tested: 1.17.1
+
+# ── Integration test (heavy — requires Java) ─────────────────────────────────
+# Uncomment these if you need to run integration tests with PyTerrier.
+#
+# python-terrier>=0.10.0     # tested: 1.0
+# ir_datasets>=0.5.0         # tested: 0.5.11
+
+# ── GPU users ────────────────────────────────────────────────────────────────
+# The torch line above installs CPU-only torch by default.
+# For CUDA, install torch separately BEFORE installing this file:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r requirements.txt
+#   pip install -e .

@@ -12,14 +12,15 @@
 - When adding new corpora, prefer a lightweight loader helper in `scripts/` or `data/README.md` and gate expensive paths behind flags/env vars (e.g., `DATA_DIR`, `BENCH_FAST=1`).
 
 ## Build, Test, and Development Commands
-- Install: `pip install -e .` (run inside an activated `venv`).
+- Install: `uv sync` (recommended, uses lock file) or `pip install -e .` (no lock file).
+- GPU users: install CUDA torch first (`uv pip install torch --index-url https://download.pytorch.org/whl/cu124`), then `uv sync`.
 - Quick demos: `make run-terrier`, `make run-langchain`, or `make run-active-learning` to run packaged example pipelines; use `make run SCRIPT=examples/<file>.py` for any script.
 - Benchmarks: `make run-benchmarks` executes `scripts/benchmark_suite.py`.
 - Tests: `pytest` runs the full suite; scope to `pytest tests/unit` or `pytest tests/integration` when iterating.
 - Cleanup: `make clean` removes local log artifacts.
 
 ## Coding Style & Naming Conventions
-- Python 3.9+ with 4-space indents and type hints everywhere; favor clear dataclasses/Pydantic models for configs and responses.
+- Python 3.10+ with 4-space indents and type hints everywhere; favor clear dataclasses/Pydantic models for configs and responses.
 - Follow Black formatting (`python -m black .`); keep imports tidy and avoid unused symbols.
 - Module/file names are `snake_case`; classes `PascalCase`; constants `UPPER_SNAKE`; functions/variables `lower_snake`.
 - Keep CLI help and docstrings current when touching `ragtune.cli` or public APIs.
