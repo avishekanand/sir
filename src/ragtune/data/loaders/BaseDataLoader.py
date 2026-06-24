@@ -12,7 +12,7 @@ Every loader exposes:
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
-from src.ragtune.data.datastructures import Query, Context, Sample
+from ragtune.data.datastructures import Query, Context, Sample
 
 
 class BaseDataLoader(ABC):
