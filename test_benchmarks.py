@@ -22,7 +22,9 @@ Original file location:
 # ── 0. Clone & setup ─────────────────────────────────────────────────────────
 
 !git clone https://github.com/avishekanand/sir
-# %cd sir
+
+import os
+os.chdir('sir')
 
 !git fetch -v -a
 
