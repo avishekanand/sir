@@ -186,7 +186,10 @@ def run_controller_scenario(
         output = controller.run(qtext)
         latencies.append((time.time() - t0) * 1000)
         docs_reranked.append(output.final_budget_state.get("rerank_docs", 0))
-        results[qid] = {doc.id: doc.score for doc in output.documents}
+        results[qid] = {
+                doc.id: 1.0 / (rank + 1)
+                for rank, doc in enumerate(output.documents)
+            }
 
     return results, float(pd.Series(docs_reranked).mean()), float(pd.Series(latencies).mean())
 
@@ -201,8 +204,8 @@ def run_faiss_baseline(
     for qid, qtext in queries.items():
         pairs = vectorstore.similarity_search_with_score(qtext, k=CANDIDATES_TOP_K)
         results[qid] = {
-            doc.metadata["id"]: float(1.0 / (1.0 + score))
-            for doc, score in pairs
+            doc.metadata["id"]: 1.0 / (rank + 1)
+            for rank, (doc, _) in enumerate(pairs)
         }
     return results
 
@@ -216,7 +219,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
                 reranker=reranker,
-                assembler=GreedyAssembler(),
+                assembler=GreedyAssembler(max_docs=CANDIDATES_TOP_K),
                 scheduler=ActiveLearningScheduler(batch_size=20),
                 estimator=BaselineEstimator(),
                 budget=CostBudget.simple(docs=20, tokens=100_000, latency=600_000),
@@ -228,7 +231,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
                 reranker=reranker,
-                assembler=GreedyAssembler(),
+                assembler=GreedyAssembler(max_docs=CANDIDATES_TOP_K),
                 scheduler=ActiveLearningScheduler(batch_size=2),
                 estimator=SimilarityEstimator(),
                 budget=CostBudget.simple(docs=10, tokens=100_000, latency=600_000),
@@ -240,7 +243,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
                 reranker=reranker,
-                assembler=GreedyAssembler(),
+                assembler=GreedyAssembler(max_docs=CANDIDATES_TOP_K),
                 scheduler=ActiveLearningScheduler(batch_size=5),
                 estimator=SimilarityEstimator(),
                 budget=CostBudget.simple(docs=20, tokens=100_000, latency=600_000),
