@@ -31,6 +31,7 @@ from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.components.estimators import BaselineEstimator, SimilarityEstimator
 from ragtune.utils.config import config
+from ragtune.data.loaders.FreshStackLoader import FreshStackLoader
 
 _console = Console()
 def print_header(msg): _console.print(f"[bold blue]{msg}[/bold blue]")
@@ -51,35 +52,21 @@ CROSS_ENCODER: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 def load_domain(topic: str):
     """
-    Returns (corpus, queries, nuggets, qrels_nuggets, qrels_query, query_to_nuggets).
-    corpus follows BEIR format: {doc_id: {"text": str, "title": str}}.
+    Returns (corpus, queries, qrels_nuggets, qrels_query, query_to_nuggets).
+    corpus: {doc_id: {"text": str, "title": str}}
     queries: {query_id: str}
     """
-    try:
-        from freshstack.datasets import DataLoader
-    except ImportError:
-        raise ImportError(
-            "FreshStack is not installed. Run: pip install freshstack\n"
-            "Or: pip install -e '.[benchmarks]'"
-        )
-
     print_step(f"Loading FreshStack [{topic}] (test split)...")
-    loader = DataLoader(
-        queries_repo="freshstack/queries-oct-2024",
-        corpus_repo="freshstack/corpus-oct-2024",
-        topic=topic,
-    )
-    corpus, queries, nuggets = loader.load(split="test")
-    qrels_nuggets, qrels_query, query_to_nuggets = loader.load_qrels(split="test")
-    return corpus, queries, nuggets, qrels_nuggets, qrels_query, query_to_nuggets
+    loader = FreshStackLoader(topic=topic, split="test")
+    corpus = loader.get_corpus()
+    queries = loader.get_queries()
+    qrels_nuggets, qrels_query, query_to_nuggets = loader.load_nugget_qrels()
+    return corpus, queries, qrels_nuggets, qrels_query, query_to_nuggets
 
 
-def sample_queries(queries: Dict[str, Any], n: int) -> Dict[str, str]:
+def sample_queries(queries: Dict[str, str], n: int) -> Dict[str, str]:
     """Returns up to n queries as {query_id: query_text}."""
-    result = {}
-    for qid, val in list(queries.items())[:n]:
-        result[qid] = val["text"] if isinstance(val, dict) else val
-    return result
+    return dict(list(queries.items())[:n])
 
 
 def build_retriever(
@@ -93,7 +80,6 @@ def build_retriever(
     Builds a FAISS index from the corpus, ensuring all gold docs are included.
     Returns the RAGtune-compatible retriever and the raw vectorstore.
     """
-    # Collect gold doc IDs so they are never dropped by the corpus cap
     gold_ids: set = set()
     for doc_scores in qrels_query.values():
         gold_ids.update(doc_scores.keys())
@@ -258,7 +244,7 @@ def main():
     for topic in DOMAINS:
         print_header(f"\n── Domain: {topic} ──")
 
-        corpus, queries_raw, nuggets, qrels_nuggets, qrels_query, query_to_nuggets = load_domain(topic)
+        corpus, queries_raw, qrels_nuggets, qrels_query, query_to_nuggets = load_domain(topic)
         queries = sample_queries(queries_raw, QUERIES_PER_DOMAIN)
         print_step(f"Loaded {len(corpus)} corpus docs, {len(queries)} queries")
 
