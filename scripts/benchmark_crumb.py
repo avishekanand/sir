@@ -27,7 +27,6 @@ import os
 import time
 from typing import Dict, List, Set, Tuple
 
-import numpy as np
 import pandas as pd
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -35,6 +34,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from rich.console import Console
 
 from ragtune.adapters.langchain import LangChainRetriever
+from ragtune.evaluation.RetrievalEvaluator import RetrievalEvaluator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.estimators import BaselineEstimator, SimilarityEstimator
 from ragtune.components.reformulators import IdentityReformulator
@@ -47,6 +47,8 @@ _console = Console()
 def print_header(msg): _console.print(f"[bold blue]{msg}[/bold blue]")
 def print_step(msg):   _console.print(f"[dim]{msg}[/dim]")
 def print_success(msg): _console.print(f"[bold green]{msg}[/bold green]")
+
+_evaluator = RetrievalEvaluator(k_values=[10, 50])
 
 # --- Configuration ---
 
@@ -153,35 +155,17 @@ def build_retriever(
 
 # --- Evaluation ---
 
-def _ndcg_at_k(ranked_ids: List[str], gold: Set[str], k: int) -> float:
-    rel = [1 if pid in gold else 0 for pid in ranked_ids[:k]]
-    dcg = sum(r / np.log2(i + 2) for i, r in enumerate(rel))
-    ideal = sorted(rel, reverse=True)
-    idcg = sum(r / np.log2(i + 2) for i, r in enumerate(ideal))
-    return dcg / idcg if idcg else 0.0
-
-
-def _recall_at_k(ranked_ids: List[str], gold: Set[str], k: int) -> float:
-    return sum(1 for pid in ranked_ids[:k] if pid in gold) / len(gold) if gold else 0.0
-
-
 def score_results(
     results: Dict[str, Dict[str, float]],
     qrels: Dict[str, Dict[str, int]],
 ) -> Dict[str, float]:
     """Computes macro-averaged NDCG@10, Recall@10, Recall@50 at passage level."""
-    ndcg10, rec10, rec50 = [], [], []
-    for qid, doc_scores in results.items():
-        gold = set((qrels.get(qid) or {}).keys())
-        if not gold:
-            continue
-        ranked_ids = [pid for pid, _ in sorted(doc_scores.items(), key=lambda x: -x[1])]
-        ndcg10.append(_ndcg_at_k(ranked_ids, gold, 10))
-        rec10.append(_recall_at_k(ranked_ids, gold, 10))
-        rec50.append(_recall_at_k(ranked_ids, gold, 50))
-
-    def _mean(vals): return round(sum(vals) / len(vals), 4) if vals else 0.0
-    return {"NDCG@10": _mean(ndcg10), "Recall@10": _mean(rec10), "Recall@50": _mean(rec50)}
+    metrics = _evaluator.evaluate(qrels, results)
+    return {
+        "NDCG@10":   round(metrics["ndcg"].get("NDCG@10",    0.0), 4),
+        "Recall@10": round(metrics["recall"].get("Recall@10", 0.0), 4),
+        "Recall@50": round(metrics["recall"].get("Recall@50", 0.0), 4),
+    }
 
 
 # --- Scenario Execution ---
@@ -235,7 +219,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 assembler=GreedyAssembler(),
                 scheduler=ActiveLearningScheduler(batch_size=20),
                 estimator=BaselineEstimator(),
-                budget=CostBudget(max_reranker_docs=20),
+                budget=CostBudget.simple(docs=20, tokens=100_000, latency=600_000),
             ),
         ),
         (
@@ -247,7 +231,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 assembler=GreedyAssembler(),
                 scheduler=ActiveLearningScheduler(batch_size=2),
                 estimator=SimilarityEstimator(),
-                budget=CostBudget(max_reranker_docs=10),
+                budget=CostBudget.simple(docs=10, tokens=100_000, latency=600_000),
             ),
         ),
         (
@@ -259,7 +243,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
                 assembler=GreedyAssembler(),
                 scheduler=ActiveLearningScheduler(batch_size=5),
                 estimator=SimilarityEstimator(),
-                budget=CostBudget(max_reranker_docs=20),
+                budget=CostBudget.simple(docs=20, tokens=100_000, latency=600_000),
             ),
         ),
     ]
