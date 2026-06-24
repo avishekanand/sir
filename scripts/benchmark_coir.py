@@ -87,10 +87,11 @@ def load_task(name: str) -> Tuple[
     """
     dataset_id = f"{HF_ORG}/{name}"
 
-    # CoIR datasets follow BEIR format: corpus/queries/qrels are dataset configs,
-    # not splits. Corpus lives in config="corpus", split="train".
+    # CoIR datasets follow BEIR HuggingFace convention: corpus/queries/qrels are
+    # dataset *configs*. Within each config the split name mirrors the config name
+    # (e.g. config="corpus" → split="corpus"), though some datasets deviate.
     print_step(f"Loading corpus [{name}]...")
-    corpus_rows = fetch_hf_split(dataset_id, config="corpus", split="train")
+    corpus_rows = fetch_hf_split(dataset_id, config="corpus", split="corpus")
     corpus: Dict[str, Dict[str, str]] = {}
     populate_corpus(corpus, corpus_rows, id_col="_id", text_col="text", title_col="title")
 
@@ -106,7 +107,7 @@ def load_task(name: str) -> Tuple[
     qrels = {qid: {did: s for did, s in rels.items() if s > 0} for qid, rels in qrels.items()}
     qrels = {qid: rels for qid, rels in qrels.items() if rels}
 
-    # Queries — config="queries"; split name varies across datasets ("queries" or "test")
+    # Queries — config="queries"; split name mirrors config or falls back to "test"
     print_step(f"Loading queries [{name}]...")
     try:
         queries_rows = fetch_hf_split(dataset_id, config="queries", split="queries")

@@ -23,16 +23,12 @@ Original file location:
 
 import os, sys
 
-# In Colab the runtime always starts at /content.
-# Pin unconditionally to /content/sir so re-runs and stale state
-# (e.g. a nested sir/sir/ clone from a previous bad run) never matter.
+# Clone into /content/sir if not already there (|| true makes this a no-op on re-run),
+# then chdir unconditionally — fixes stale-CWD and nested sir/sir/ states.
 if os.path.exists('/content'):
-    _repo = '/content/sir'
-    if not os.path.exists(_repo):
-        !git clone https://github.com/avishekanand/sir /content/sir
-    os.chdir(_repo)
+    !git clone https://github.com/avishekanand/sir /content/sir 2>/dev/null || true
+    os.chdir('/content/sir')
 else:
-    # Local / non-Colab machine: navigate relative to wherever we started.
     if not os.path.exists('pyproject.toml'):
         if not os.path.exists('sir'):
             !git clone https://github.com/avishekanand/sir
