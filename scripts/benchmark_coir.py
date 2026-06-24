@@ -95,13 +95,13 @@ def load_task(name: str) -> Tuple[
     corpus: Dict[str, Dict[str, str]] = {}
     populate_corpus(corpus, corpus_rows, id_col="_id", text_col="text", title_col="title")
 
-    # Qrels — config="qrels", try test split first, fall back to train
+    # Qrels live in the default config (no name) with train/test splits
     print_step(f"Loading qrels [{name}]...")
     qrels: Dict[str, Dict[str, int]] = {}
     try:
-        qrels_rows = fetch_hf_split(dataset_id, config="qrels", split="test")
+        qrels_rows = fetch_hf_split(dataset_id, config=None, split="test")
     except Exception:
-        qrels_rows = fetch_hf_split(dataset_id, config="qrels", split="train")
+        qrels_rows = fetch_hf_split(dataset_id, config=None, split="train")
     populate_qrels(qrels, qrels_rows, qid_col="query-id", did_col="corpus-id", score_col="score")
     # Keep only positive relevance judgements
     qrels = {qid: {did: s for did, s in rels.items() if s > 0} for qid, rels in qrels.items()}
