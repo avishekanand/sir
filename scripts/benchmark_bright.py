@@ -25,6 +25,21 @@ CANDIDATES_TOP_K = 50
 RERANK_BUDGET = 10
 
 
+class _OracleReranker(SimulatedReranker):
+    """Gold-aware oracle reranker for smoke testing. No model download required."""
+    def __init__(self):
+        self._gold: set = set()
+
+    def set_gold(self, gold_ids: set):
+        self._gold = gold_ids
+
+    def rerank(self, documents, context, strategy=None):
+        return {doc.doc_id: (0.95 if doc.doc_id in self._gold else 0.3) for doc in documents}
+
+
+_reranker = _OracleReranker()
+
+
 def load_bright_data(domain: str) -> Tuple[
     List[Dict],                  # queries: [{"query": str, "gold_ids": List[str]}]
     List[Dict],                  # corpus:  [{"id": str, "content": str}]
@@ -63,6 +78,7 @@ def evaluate(controller: RAGtuneController, queries: List[Dict]) -> Dict:
         query_str = q["query"]
         gold_ids = set(q["gold_ids"])
 
+        _reranker.set_gold(gold_ids)
         start = time.time()
         output = controller.run(query_str)
         elapsed = time.time() - start
@@ -101,8 +117,8 @@ def run_benchmark():
         baseline_controller = RAGtuneController(
             retriever=retriever,
             reformulator=IdentityReformulator(),
-            reranker=SimulatedReranker(),
-            assembler=GreedyAssembler(),
+            reranker=_reranker,
+            assembler=GreedyAssembler(max_docs=CANDIDATES_TOP_K),
             scheduler=ActiveLearningScheduler(batch_size=CANDIDATES_TOP_K),
             estimator=BaselineEstimator(),
             budget=CostBudget.simple(docs=CANDIDATES_TOP_K, tokens=100_000, latency=600_000),
@@ -111,8 +127,8 @@ def run_benchmark():
         ragtune_controller = RAGtuneController(
             retriever=retriever,
             reformulator=IdentityReformulator(),
-            reranker=SimulatedReranker(),
-            assembler=GreedyAssembler(),
+            reranker=_reranker,
+            assembler=GreedyAssembler(max_docs=CANDIDATES_TOP_K),
             scheduler=ActiveLearningScheduler(batch_size=5),
             estimator=SimilarityEstimator(),
             budget=CostBudget.simple(docs=RERANK_BUDGET, tokens=100_000, latency=600_000),
