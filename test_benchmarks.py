@@ -8,133 +8,118 @@ Benchmarks covered:
   1. FreshStack  — technical IR on GitHub / StackOverflow corpora
   2. CoIR        — code-domain retrieval (Stack Overflow, CoSQA, …)
   3. BRIGHT      — reasoning-intensive retrieval
+  4. OBLIQ       — oblique-query retrieval (tip-of-tongue, analogue, descriptive)
+  5. CRUMB       — passage retrieval across 8 domains
+  6. SKILLRET    — skill / tool retrieval for agentic tasks
 
-Each benchmark runs with a small slice of data (1 domain / dataset, few queries)
-to confirm the full pipeline — data loading → indexing → RAGtune → evaluation — works.
+Each benchmark runs with a small slice of data to confirm the full pipeline
+— data loading → indexing → RAGtune → evaluation — works end to end.
 
 Original file location:
   https://colab.research.google.com/  (create a new notebook and paste this)
 """
 
-# ── 0. Clone & configure ────────────────────────────────────────────────────
+# ── 0. Clone & setup ─────────────────────────────────────────────────────────
 
 !git clone https://github.com/avishekanand/sir
 # %cd sir
 
 !git fetch -v -a
+
+# ── 1. Install shared dependencies (done once, covers all benchmarks) ─────────
+
 !git checkout bench/coir-integration
 !git pull origin bench/coir-integration
 
-# ── 1. Install dependencies ─────────────────────────────────────────────────
-
-# Core + benchmark extras
 !pip install -e '.[benchmarks]' -q
 
-# Evaluation backend (needed by CoIR RetrievalEvaluator)
+# Evaluation backend (RetrievalEvaluator)
 !pip install pytrec_eval-terrier -q
 
-# FreshStack-specific evaluator (α-NDCG, Coverage metrics)
+# FreshStack-specific α-NDCG / Coverage metrics
 !pip install freshstack -q
 
-# GPU-accelerated FAISS — replaces faiss-cpu from pyproject.toml
-# Comment out if running on a CPU-only runtime.
+# HuggingFace hub download (needed by OBLIQ for TSV qrels)
+!pip install huggingface_hub -q
+
+# GPU-accelerated FAISS — comment out if on a CPU-only runtime
 !pip install faiss-gpu -q
 
-# HuggingFace ecosystem (embeddings + dataset downloads)
-!pip install datasets sentence-transformers -q
-
-# ── 2. Sanity-check: unit tests ─────────────────────────────────────────────
+# ── 2. Unit tests ─────────────────────────────────────────────────────────────
 
 !pip install pytest -q
 !pytest tests/unit/ -q --tb=short 2>&1 | tail -20
 
-# ── 3. FreshStack benchmark (smoke: 1 domain, 5 queries) ────────────────────
-#
-# Full run: remove env var overrides.
-# Env vars:
-#   FRESHSTACK_DOMAINS  — comma-separated topic names (langchain yolo angular laravel godot)
+# ── 3–5. Benchmarks on bench/coir-integration ────────────────────────────────
 
 import subprocess, os
 
-print("\n" + "=" * 60)
-print("BENCHMARK 1 / 3 — FreshStack")
-print("=" * 60)
+def run(label, cmd, env=None):
+    print(f"\n{'='*60}\n{label}\n{'='*60}")
+    r = subprocess.run(cmd, env={**os.environ, **(env or {})})
+    tag = "[PASS]" if r.returncode == 0 else f"[FAIL] exit {r.returncode}"
+    print(f"\n{tag} {label}")
+    return r.returncode == 0
 
-env_freshstack = {
-    **os.environ,
-    "FRESHSTACK_DOMAINS": "langchain",   # 1 domain
-}
-
-result = subprocess.run(
+# FreshStack — 1 domain, 5 queries
+run("BENCHMARK 1/6 — FreshStack",
     ["python", "scripts/benchmark_freshstack.py"],
-    env=env_freshstack,
-    capture_output=False,   # stream output live
-)
+    {"FRESHSTACK_DOMAINS": "langchain"})
 
-if result.returncode != 0:
-    print(f"\n[FAIL] benchmark_freshstack.py exited with code {result.returncode}")
-else:
-    print("\n[PASS] FreshStack benchmark complete")
-
-# ── 4. CoIR benchmark (smoke: 1 dataset, 5 queries) ─────────────────────────
-#
-# Full run: remove env var overrides.
-# Env vars:
-#   COIR_DATASETS  — comma-separated dataset names
-#   COIR_QUERIES   — queries per dataset
-
-print("\n" + "=" * 60)
-print("BENCHMARK 2 / 3 — CoIR")
-print("=" * 60)
-
-env_coir = {
-    **os.environ,
-    "COIR_DATASETS": "stackoverflow-qa",   # 1 dataset
-    "COIR_QUERIES": "5",
-}
-
-result = subprocess.run(
+# CoIR — 1 dataset, 5 queries
+run("BENCHMARK 2/6 — CoIR",
     ["python", "scripts/benchmark_coir.py"],
-    env=env_coir,
-    capture_output=False,
-)
+    {"COIR_DATASETS": "stackoverflow-qa", "COIR_QUERIES": "5"})
 
-if result.returncode != 0:
-    print(f"\n[FAIL] benchmark_coir.py exited with code {result.returncode}")
-else:
-    print("\n[PASS] CoIR benchmark complete")
-
-# ── 5. BRIGHT benchmark (smoke: 1 domain, 3 queries) ────────────────────────
-#
-# Full run: remove env var overrides.
-# Env vars:
-#   BRIGHT_DOMAINS  — comma-separated task names (biology coding mathematics …)
-#   BRIGHT_QUERIES  — queries per domain
-
-print("\n" + "=" * 60)
-print("BENCHMARK 3 / 3 — BRIGHT")
-print("=" * 60)
-
-env_bright = {
-    **os.environ,
-    "BRIGHT_DOMAINS": "biology",   # 1 domain
-    "BRIGHT_QUERIES": "3",
-}
-
-result = subprocess.run(
+# BRIGHT — 1 domain, 3 queries
+run("BENCHMARK 3/6 — BRIGHT",
     ["python", "scripts/benchmark_bright.py"],
-    env=env_bright,
-    capture_output=False,
-)
+    {"BRIGHT_DOMAINS": "biology", "BRIGHT_QUERIES": "3"})
 
-if result.returncode != 0:
-    print(f"\n[FAIL] benchmark_bright.py exited with code {result.returncode}")
-else:
-    print("\n[PASS] BRIGHT benchmark complete")
+# ── 6. OBLIQ (rseetharaman/oblique-integration) ───────────────────────────────
+#
+# Env vars:
+#   OBLIQ_TASKS    — comma-separated task names (congress math writing twitter wildchat)
+#   OBLIQ_QUERIES  — queries per task
 
-# ── 6. Summary ───────────────────────────────────────────────────────────────
+!git stash
+!git checkout rseetharaman/oblique-integration
+!git pull origin rseetharaman/oblique-integration
 
-print("\n" + "=" * 60)
+run("BENCHMARK 4/6 — OBLIQ",
+    ["python", "scripts/benchmark_obliq.py"],
+    {"OBLIQ_TASKS": "congress", "OBLIQ_QUERIES": "5"})
+
+# ── 7. CRUMB (rseetharaman/crumb-integration) ─────────────────────────────────
+#
+# Env vars:
+#   CRUMB_TASKS    — comma-separated task names
+#   CRUMB_QUERIES  — queries per task
+
+!git stash
+!git checkout rseetharaman/crumb-integration
+!git pull origin rseetharaman/crumb-integration
+
+run("BENCHMARK 5/6 — CRUMB",
+    ["python", "scripts/benchmark_crumb.py"],
+    {"CRUMB_TASKS": "paper_retrieval", "CRUMB_QUERIES": "5"})
+
+# ── 8. SKILLRET (rseetharaman/skillret-integration) ──────────────────────────
+#
+# Env vars:
+#   SKILLRET_QUERIES — number of queries to evaluate
+
+!git stash
+!git checkout rseetharaman/skillret-integration
+!git pull origin rseetharaman/skillret-integration
+
+run("BENCHMARK 6/6 — SKILLRET",
+    ["python", "scripts/benchmark_skillret.py"],
+    {"SKILLRET_QUERIES": "10"})
+
+# ── 9. Summary ────────────────────────────────────────────────────────────────
+
+print(f"\n{'='*60}")
 print("All benchmark smoke tests finished.")
-print("Check [PASS] / [FAIL] lines above for status.")
-print("=" * 60)
+print("Check [PASS] / [FAIL] lines above for individual results.")
+print(f"{'='*60}")
