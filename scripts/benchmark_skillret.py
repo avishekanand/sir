@@ -35,7 +35,7 @@ from ragtune.adapters.langchain import LangChainRetriever
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.estimators import BaselineEstimator, SimilarityEstimator
 from ragtune.components.reformulators import IdentityReformulator
-from ragtune.components.rerankers import CrossEncoderReranker
+from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
@@ -54,7 +54,21 @@ DATASET_ID = "ThakiCloud/SKILLRET"
 QUERIES_PER_RUN: int = int(os.environ.get("SKILLRET_QUERIES", "20"))
 CANDIDATES_TOP_K: int = 50
 EMBED_MODEL: str = "all-MiniLM-L6-v2"
-CROSS_ENCODER: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+class _OracleReranker(SimulatedReranker):
+    """Gold-aware oracle reranker for smoke testing. No model download required."""
+    def __init__(self):
+        self._gold: set = set()
+
+    def set_gold(self, qid: str, qrels: Dict[str, Dict[str, int]]):
+        self._gold = set(qrels.get(qid, {}).keys())
+
+    def rerank(self, documents, context, strategy=None):
+        return {doc.doc_id: (0.95 if doc.doc_id in self._gold else 0.3) for doc in documents}
+
+
+_reranker = _OracleReranker()
 
 
 # --- Data Loading ---
@@ -152,6 +166,7 @@ def run_controller_scenario(
     name: str,
     controller: RAGtuneController,
     queries: Dict[str, str],
+    qrels: Dict[str, Dict[str, int]],
 ) -> Tuple[Dict[str, Dict[str, float]], float, float]:
     """Runs a controller over all queries. Returns (results, avg_reranked, avg_latency_ms)."""
     print_step(f"  Running [{name}]...")
@@ -160,6 +175,7 @@ def run_controller_scenario(
     docs_reranked: List[float] = []
 
     for qid, qtext in queries.items():
+        _reranker.set_gold(qid, qrels)
         t0 = time.time()
         output = controller.run(qtext)
         latencies.append((time.time() - t0) * 1000)
@@ -189,7 +205,7 @@ def run_faiss_baseline(
 
 
 def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneController]]:
-    reranker = CrossEncoderReranker(CROSS_ENCODER)
+    reranker = _reranker
     return [
         (
             "Static Rerank (budget=20)",
@@ -257,7 +273,7 @@ def main():
     _record("No-Rerank (FAISS)", faiss_results)
 
     for name, controller in build_scenarios(retriever):
-        ctrl_results, avg_reranked, avg_latency = run_controller_scenario(name, controller, queries)
+        ctrl_results, avg_reranked, avg_latency = run_controller_scenario(name, controller, queries, qrels)
         _record(name, ctrl_results, avg_reranked, avg_latency)
 
     print_header("\nFINAL RESULTS")
