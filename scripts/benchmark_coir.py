@@ -87,27 +87,31 @@ def load_task(name: str) -> Tuple[
     """
     dataset_id = f"{HF_ORG}/{name}"
 
-    # Corpus — CoIR uses "_id" as the document ID column
+    # CoIR datasets follow BEIR format: corpus/queries/qrels are dataset configs,
+    # not splits. Corpus lives in config="corpus", split="train".
     print_step(f"Loading corpus [{name}]...")
-    corpus_rows = fetch_hf_split(dataset_id, config=None, split="corpus")
+    corpus_rows = fetch_hf_split(dataset_id, config="corpus", split="train")
     corpus: Dict[str, Dict[str, str]] = {}
     populate_corpus(corpus, corpus_rows, id_col="_id", text_col="text", title_col="title")
 
-    # Qrels — try test split first, fall back to train
+    # Qrels — config="qrels", try test split first, fall back to train
     print_step(f"Loading qrels [{name}]...")
     qrels: Dict[str, Dict[str, int]] = {}
     try:
-        qrels_rows = fetch_hf_split(dataset_id, config=None, split="test")
+        qrels_rows = fetch_hf_split(dataset_id, config="qrels", split="test")
     except Exception:
-        qrels_rows = fetch_hf_split(dataset_id, config=None, split="train")
+        qrels_rows = fetch_hf_split(dataset_id, config="qrels", split="train")
     populate_qrels(qrels, qrels_rows, qid_col="query-id", did_col="corpus-id", score_col="score")
     # Keep only positive relevance judgements
     qrels = {qid: {did: s for did, s in rels.items() if s > 0} for qid, rels in qrels.items()}
     qrels = {qid: rels for qid, rels in qrels.items() if rels}
 
-    # Queries — cap to QUERIES_PER_DATASET, keeping only those with qrels
+    # Queries — config="queries"; split name varies across datasets ("queries" or "test")
     print_step(f"Loading queries [{name}]...")
-    queries_rows = fetch_hf_split(dataset_id, config=None, split="queries")
+    try:
+        queries_rows = fetch_hf_split(dataset_id, config="queries", split="queries")
+    except Exception:
+        queries_rows = fetch_hf_split(dataset_id, config="queries", split="test")
     queries: Dict[str, str] = {}
     for row in queries_rows:
         qid = str(row["_id"])
