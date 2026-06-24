@@ -16,6 +16,7 @@ from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.components.estimators import SimilarityEstimator, BaselineEstimator
 from ragtune.data.loaders.BRIGHTLoader import BRIGHTLoader
+from ragtune.utils.config import config
 from ragtune.utils.console import print_header, print_step
 
 # Configuration
@@ -101,6 +102,7 @@ def evaluate(controller: RAGtuneController, queries: List[Dict]) -> Dict:
 
 
 def run_benchmark():
+    config.set("retrieval.original_query_depth", CANDIDATES_TOP_K)
     print_header("RAGtune Advanced Benchmarking: The BRIGHT Test")
 
     all_metrics = []
