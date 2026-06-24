@@ -191,7 +191,12 @@ def run_controller_scenario(
         output = controller.run(qtext)
         latencies.append((time.time() - t0) * 1000)
         docs_reranked.append(output.final_budget_state.get("rerank_docs", 0))
-        results[qid] = {doc.id: doc.score for doc in output.documents}
+        # Reciprocal-rank scores preserve the assembler's ordering without
+        # mixing crossencoder and FAISS score scales.
+        results[qid] = {
+            doc.id: 1.0 / (rank + 1)
+            for rank, doc in enumerate(output.documents)
+        }
 
     return results, float(pd.Series(docs_reranked).mean()), float(pd.Series(latencies).mean())
 
@@ -200,14 +205,14 @@ def run_faiss_baseline(
     vectorstore: FAISS,
     queries: Dict[str, str],
 ) -> Dict[str, Dict[str, float]]:
-    """Pure retrieval baseline — no reranking, raw FAISS cosine scores."""
+    """Pure retrieval baseline — no reranking, FAISS rank order as reciprocal-rank scores."""
     print_step("  Running [No-Rerank Baseline (FAISS)]...")
     results: Dict[str, Dict[str, float]] = {}
     for qid, qtext in queries.items():
         pairs = vectorstore.similarity_search_with_score(qtext, k=CANDIDATES_TOP_K)
         results[qid] = {
-            doc.metadata["id"]: float(1.0 / (1.0 + score))
-            for doc, score in pairs
+            doc.metadata["id"]: 1.0 / (rank + 1)
+            for rank, (doc, _) in enumerate(pairs)
         }
     return results
 
