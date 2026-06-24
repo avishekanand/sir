@@ -5,6 +5,9 @@ from .HuggingFaceLoader import HuggingFaceLoader
 from .IRDatasetsLoader import IRDatasetsLoader
 from .DataLoaderFactory import DataLoaderFactory
 from .RetrieverDataset import RetrieverDataset
+from .ToolRetLoader import ToolRetLoader
+from .SkillRetLoader import SkillRetLoader
+from .SRABenchLoader import SRABenchLoader
 
 __all__ = [
     "BaseDataLoader",
@@ -15,4 +18,7 @@ __all__ = [
     "IRDatasetsLoader",
     "DataLoaderFactory",
     "RetrieverDataset",
+    "ToolRetLoader",
+    "SkillRetLoader",
+    "SRABenchLoader",
 ]
