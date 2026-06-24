@@ -23,17 +23,20 @@ Original file location:
 
 import os, sys
 
-# Navigate to the repo root regardless of where Colab started.
-# If we're already inside the repo (pyproject.toml present), stay here.
-# If we're one level above (sir/ exists), cd into it.
-# Otherwise clone from scratch.
-if os.path.exists('pyproject.toml'):
-    pass  # already inside sir/
-elif os.path.exists('sir/pyproject.toml'):
-    os.chdir('sir')
+# In Colab the runtime always starts at /content.
+# Pin unconditionally to /content/sir so re-runs and stale state
+# (e.g. a nested sir/sir/ clone from a previous bad run) never matter.
+if os.path.exists('/content'):
+    _repo = '/content/sir'
+    if not os.path.exists(_repo):
+        !git clone https://github.com/avishekanand/sir /content/sir
+    os.chdir(_repo)
 else:
-    !git clone https://github.com/avishekanand/sir
-    os.chdir('sir')
+    # Local / non-Colab machine: navigate relative to wherever we started.
+    if not os.path.exists('pyproject.toml'):
+        if not os.path.exists('sir'):
+            !git clone https://github.com/avishekanand/sir
+        os.chdir('sir')
 
 print(f"Working directory: {os.getcwd()}")
 
