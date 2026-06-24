@@ -21,9 +21,12 @@ Original file location:
 
 # ── 0. Clone & setup ─────────────────────────────────────────────────────────
 
-!git clone https://github.com/avishekanand/sir
-
 import os
+
+# Clone only if the directory doesn't already exist (idempotent on re-run)
+if not os.path.exists('sir'):
+    !git clone https://github.com/avishekanand/sir
+
 os.chdir('sir')
 
 !git fetch -v -a
@@ -41,9 +44,6 @@ os.chdir('sir')
 # FreshStack-specific α-NDCG / Coverage metrics
 !pip install freshstack -q
 
-# HuggingFace hub download (needed by OBLIQ for TSV qrels)
-!pip install huggingface_hub -q
-
 # GPU-accelerated FAISS — comment out if on a CPU-only runtime
 !pip install faiss-gpu -q
 
@@ -58,9 +58,15 @@ import subprocess, os
 
 def run(label, cmd, env=None):
     print(f"\n{'='*60}\n{label}\n{'='*60}")
-    r = subprocess.run(cmd, env={**os.environ, **(env or {})})
-    tag = "[PASS]" if r.returncode == 0 else f"[FAIL] exit {r.returncode}"
-    print(f"\n{tag} {label}")
+    r = subprocess.run(cmd, env={**os.environ, **(env or {})},
+                       capture_output=True, text=True)
+    if r.stdout:
+        print(r.stdout)
+    if r.returncode != 0:
+        print(f"STDERR:\n{r.stderr}")
+        print(f"\n[FAIL] exit {r.returncode} — {label}")
+    else:
+        print(f"\n[PASS] {label}")
     return r.returncode == 0
 
 # FreshStack — 1 domain, 5 queries
