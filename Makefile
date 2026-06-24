@@ -20,6 +20,10 @@ run-benchmarks:
 	@echo "--- Running RAGtune Unified Benchmark Suite ---"
 	@$(PYTHON_CLEAN) scripts/benchmark_suite.py
 
+run-skillret:
+	@echo "--- Running SKILLRET Benchmark ---"
+	@$(PYTHON_CLEAN) scripts/benchmark_skillret.py
+
 run-langchain:
 	@echo "--- Running LangChain Demo ---"
 	@$(PYTHON_CLEAN) examples/demo_langchain_retriever.py
