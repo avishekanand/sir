@@ -42,6 +42,7 @@ from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
+from ragtune.utils.config import config
 
 _console = Console()
 def print_header(msg): _console.print(f"[bold blue]{msg}[/bold blue]")
@@ -271,6 +272,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
 # --- Main ---
 
 def main():
+    config.set("retrieval.original_query_depth", CANDIDATES_TOP_K)
     print_header("RAGtune × CRUMB (Passage Retrieval)")
     print_step(
         f"Tasks: {TASKS}  |  Queries/task: {QUERIES_PER_TASK}"
