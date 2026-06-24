@@ -1,3 +1,4 @@
+import os
 import time
 import pandas as pd
 from typing import Dict, List, Set, Tuple
@@ -18,8 +19,8 @@ from ragtune.data.loaders.BRIGHTLoader import BRIGHTLoader
 from ragtune.utils.console import print_header, print_step
 
 # Configuration
-DOMAINS = ["biology", "coding", "mathematics"]
-QUERIES_PER_DOMAIN = 5
+DOMAINS: List[str] = os.environ.get("BRIGHT_DOMAINS", "biology,coding,mathematics").split(",")
+QUERIES_PER_DOMAIN: int = int(os.environ.get("BRIGHT_QUERIES", "5"))
 CANDIDATES_TOP_K = 50
 RERANK_BUDGET = 10
 

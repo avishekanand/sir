@@ -104,37 +104,26 @@ if result.returncode != 0:
 else:
     print("\n[PASS] CoIR benchmark complete")
 
-# ── 5. BRIGHT benchmark (smoke: default 3 domains, 5 queries each) ──────────
+# ── 5. BRIGHT benchmark (smoke: 1 domain, 3 queries) ────────────────────────
 #
-# The script hardcodes DOMAINS and QUERIES_PER_DOMAIN.
-# To run a single domain, edit benchmark_bright.py or patch inline:
+# Full run: remove env var overrides.
+# Env vars:
+#   BRIGHT_DOMAINS  — comma-separated task names (biology coding mathematics …)
+#   BRIGHT_QUERIES  — queries per domain
 
 print("\n" + "=" * 60)
 print("BENCHMARK 3 / 3 — BRIGHT")
 print("=" * 60)
 
-# Patch the domain list to a single domain for a quick smoke test.
-# Remove this block to run all three domains.
-!python - << 'PATCH'
-import re, pathlib
-p = pathlib.Path("scripts/benchmark_bright.py")
-src = p.read_text()
-src = re.sub(
-    r'DOMAINS\s*=\s*\[.*?\]',
-    'DOMAINS = ["biology"]',
-    src,
-)
-src = re.sub(
-    r'QUERIES_PER_DOMAIN\s*=\s*\d+',
-    'QUERIES_PER_DOMAIN = 3',
-    src,
-)
-p.write_text(src)
-print("Patched benchmark_bright.py: DOMAINS=['biology'], QUERIES_PER_DOMAIN=3")
-PATCH
+env_bright = {
+    **os.environ,
+    "BRIGHT_DOMAINS": "biology",   # 1 domain
+    "BRIGHT_QUERIES": "3",
+}
 
 result = subprocess.run(
     ["python", "scripts/benchmark_bright.py"],
+    env=env_bright,
     capture_output=False,
 )
 
