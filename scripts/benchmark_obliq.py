@@ -41,6 +41,7 @@ from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
 from ragtune.evaluation.RetrievalEvaluator import RetrievalEvaluator
+from ragtune.utils.config import config
 
 _evaluator = RetrievalEvaluator(k_values=[10, 50])
 
@@ -310,6 +311,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
 # --- Main ---
 
 def main():
+    config.set("retrieval.original_query_depth", CANDIDATES_TOP_K)
     print_header("RAGtune × OBLIQ-Bench")
     print_step(
         f"Tasks: {TASKS}  |  Queries/task: {QUERIES_PER_TASK}"
