@@ -24,6 +24,10 @@ run-freshstack:
 	@echo "--- Running FreshStack Benchmark ---"
 	@$(PYTHON_CLEAN) scripts/benchmark_freshstack.py
 
+run-coir:
+	@echo "--- Running CoIR Benchmark ---"
+	@$(PYTHON_CLEAN) scripts/benchmark_coir.py
+
 run-langchain:
 	@echo "--- Running LangChain Demo ---"
 	@$(PYTHON_CLEAN) examples/demo_langchain_retriever.py

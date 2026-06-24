@@ -33,6 +33,7 @@ benchmarks = [
     "freshstack>=0.1.0",
     "pandas>=2.0.0",
     "ir-datasets>=0.5.0",
+    "datasets>=2.0.0",
 ]
 
 [project.scripts]
