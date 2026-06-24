@@ -40,6 +40,7 @@ from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
 from ragtune.evaluation.RetrievalEvaluator import RetrievalEvaluator
+from ragtune.utils.config import config
 
 _console = Console()
 def print_header(msg): _console.print(f"[bold blue]{msg}[/bold blue]")
@@ -249,6 +250,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
 # --- Main ---
 
 def main():
+    config.set("retrieval.original_query_depth", CANDIDATES_TOP_K)
     print_header("RAGtune × SKILLRET")
     print_step(f"Queries: {QUERIES_PER_RUN}  |  Candidates: {CANDIDATES_TOP_K}")
 
