@@ -21,13 +21,21 @@ Original file location:
 
 # ── 0. Clone & setup ─────────────────────────────────────────────────────────
 
-import os
+import os, sys
 
-# Clone only if the directory doesn't already exist (idempotent on re-run)
-if not os.path.exists('sir'):
+# Navigate to the repo root regardless of where Colab started.
+# If we're already inside the repo (pyproject.toml present), stay here.
+# If we're one level above (sir/ exists), cd into it.
+# Otherwise clone from scratch.
+if os.path.exists('pyproject.toml'):
+    pass  # already inside sir/
+elif os.path.exists('sir/pyproject.toml'):
+    os.chdir('sir')
+else:
     !git clone https://github.com/avishekanand/sir
+    os.chdir('sir')
 
-os.chdir('sir')
+print(f"Working directory: {os.getcwd()}")
 
 !git fetch -v -a
 
@@ -56,9 +64,9 @@ os.chdir('sir')
 
 import subprocess, os
 
-def run(label, cmd, env=None):
+def run(label, script, env=None):
     print(f"\n{'='*60}\n{label}\n{'='*60}")
-    r = subprocess.run(cmd, env={**os.environ, **(env or {})},
+    r = subprocess.run([sys.executable, script], env={**os.environ, **(env or {})},
                        capture_output=True, text=True)
     if r.stdout:
         print(r.stdout)
@@ -71,17 +79,17 @@ def run(label, cmd, env=None):
 
 # FreshStack — 1 domain, 5 queries
 run("BENCHMARK 1/6 — FreshStack",
-    ["python", "scripts/benchmark_freshstack.py"],
+    "scripts/benchmark_freshstack.py",
     {"FRESHSTACK_DOMAINS": "langchain"})
 
 # CoIR — 1 dataset, 5 queries
 run("BENCHMARK 2/6 — CoIR",
-    ["python", "scripts/benchmark_coir.py"],
+    "scripts/benchmark_coir.py",
     {"COIR_DATASETS": "stackoverflow-qa", "COIR_QUERIES": "5"})
 
 # BRIGHT — 1 domain, 3 queries
 run("BENCHMARK 3/6 — BRIGHT",
-    ["python", "scripts/benchmark_bright.py"],
+    "scripts/benchmark_bright.py",
     {"BRIGHT_DOMAINS": "biology", "BRIGHT_QUERIES": "3"})
 
 # ── 6. OBLIQ (rseetharaman/oblique-integration) ───────────────────────────────
@@ -95,7 +103,7 @@ run("BENCHMARK 3/6 — BRIGHT",
 !git pull origin rseetharaman/oblique-integration
 
 run("BENCHMARK 4/6 — OBLIQ",
-    ["python", "scripts/benchmark_obliq.py"],
+    "scripts/benchmark_obliq.py",
     {"OBLIQ_TASKS": "congress", "OBLIQ_QUERIES": "5"})
 
 # ── 7. CRUMB (rseetharaman/crumb-integration) ─────────────────────────────────
@@ -109,7 +117,7 @@ run("BENCHMARK 4/6 — OBLIQ",
 !git pull origin rseetharaman/crumb-integration
 
 run("BENCHMARK 5/6 — CRUMB",
-    ["python", "scripts/benchmark_crumb.py"],
+    "scripts/benchmark_crumb.py",
     {"CRUMB_TASKS": "paper_retrieval", "CRUMB_QUERIES": "5"})
 
 # ── 8. SKILLRET (rseetharaman/skillret-integration) ──────────────────────────
@@ -122,7 +130,7 @@ run("BENCHMARK 5/6 — CRUMB",
 !git pull origin rseetharaman/skillret-integration
 
 run("BENCHMARK 6/6 — SKILLRET",
-    ["python", "scripts/benchmark_skillret.py"],
+    "scripts/benchmark_skillret.py",
     {"SKILLRET_QUERIES": "10"})
 
 # ── 9. Summary ────────────────────────────────────────────────────────────────
