@@ -111,6 +111,15 @@ When opening or reviewing PRs in this repo, enforce these rules (full text in th
 7. **Commit format:** `<type>(<scope>): <imperative description>` — same prefix vocabulary as branches. One commit per logical change.
 8. **Spec precedes code.** Any new component, integration, or significant behavior change requires a spec merged into `specs/` *before* the implementation PR. Exception: `fix/` branches on existing well-understood components.
 
+### Copilot Code Review
+
+GitHub auto-attaches `copilot-pull-request-reviewer[bot]` to every PR in this repo. The bot reviews **once on PR open** and does **not** re-review when you push follow-up commits — its inline comments stay frozen even after they're addressed. Two consequences:
+
+- **After you push fixes for Copilot's comments**, open the PR in the web UI → in the "Reviewers" sidebar, click the 🔄 **Re-request review** icon next to `copilot-pull-request-reviewer`. This triggers a fresh pass. Without it, Copilot's stale comments give a misleading impression that issues remain.
+- **Copilot comments are advisory only.** Only `[block]` from a human reviewer gates approval (Rule 5). A Copilot comment left unaddressed isn't a blocker — but if you choose not to address one, say so in a reply so the human reviewer doesn't have to second-guess.
+
+There is no project CI, so no automated re-review trigger exists; the manual button is the only mechanism.
+
 ## See Also
 
 See `AGENTS.md` for coding style, naming conventions, commit guidelines, and PR process.
