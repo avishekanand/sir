@@ -8,6 +8,15 @@ from typing import List, Dict, Any, Optional
 
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.budget import CostBudget
+import pyterrier as pt
+
+pt.init(
+    jvm_opts=[
+        "-Djava.io.tmpdir=" + "/home/dsv/vevi4591/java_tmp",
+        "-Dterrier.zstd.version=1.5.5-2",
+    ]
+)
+
 from ragtune.adapters.pyterrier import PyTerrierRetriever
 from ragtune.components.rerankers import (
     CrossEncoderReranker,
