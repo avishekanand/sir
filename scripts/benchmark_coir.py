@@ -39,7 +39,7 @@ from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
-from ragtune.data.loaders.HuggingFaceLoader import fetch_hf_split, populate_corpus, populate_queries, populate_qrels
+from ragtune.data.loaders.CoIRLoader import CoIRLoader, COIR_DATASETS
 from ragtune.evaluation.RetrievalEvaluator import RetrievalEvaluator
 from ragtune.utils.config import config
 
@@ -49,16 +49,6 @@ def print_step(msg):   _console.print(f"[dim]{msg}[/dim]")
 def print_success(msg): _console.print(f"[bold green]{msg}[/bold green]")
 
 # --- Configuration ---
-
-HF_ORG = "CoIR-Retrieval"
-
-ALL_DATASETS = [
-    "stackoverflow-qa",
-    "codefeedback-st",
-    "apps",
-    "cosqa",
-    "synthetic-text2sql",
-]
 
 DATASETS: List[str] = os.environ.get(
     "COIR_DATASETS", "stackoverflow-qa,cosqa"
@@ -94,50 +84,14 @@ def load_task(name: str) -> Tuple[
     Dict[str, str],                  # queries: {query_id: query_text}
     Dict[str, Dict[str, int]],       # qrels: {query_id: {doc_id: score}}
 ]:
-    """
-    Loads corpus, queries, and qrels for a CoIR dataset in BEIR format using
-    the HuggingFaceLoader module-level helpers.
-    Corpus is not capped here — capping happens in build_retriever so gold docs survive.
-    Queries are capped to QUERIES_PER_DATASET, keeping only those that have qrels.
-    """
-    dataset_id = f"{HF_ORG}/{name}"
-
-    # CoIR datasets follow BEIR HuggingFace convention: corpus/queries/qrels are
-    # dataset *configs*. Within each config the split name mirrors the config name
-    # (e.g. config="corpus" → split="corpus"), though some datasets deviate.
-    print_step(f"Loading corpus [{name}]...")
-    corpus_rows = fetch_hf_split(dataset_id, config="corpus", split="corpus")
-    corpus: Dict[str, Dict[str, str]] = {}
-    populate_corpus(corpus, corpus_rows, id_col="_id", text_col="text", title_col="title")
-
-    # Qrels live in the default config (no name) with train/test splits
-    print_step(f"Loading qrels [{name}]...")
-    qrels: Dict[str, Dict[str, int]] = {}
-    try:
-        qrels_rows = fetch_hf_split(dataset_id, config=None, split="test")
-    except Exception:
-        qrels_rows = fetch_hf_split(dataset_id, config=None, split="train")
-    populate_qrels(qrels, qrels_rows, qid_col="query-id", did_col="corpus-id", score_col="score")
-    # Keep only positive relevance judgements
-    qrels = {qid: {did: s for did, s in rels.items() if s > 0} for qid, rels in qrels.items()}
-    qrels = {qid: rels for qid, rels in qrels.items() if rels}
-
-    # Queries — config="queries"; split name mirrors config or falls back to "test"
-    print_step(f"Loading queries [{name}]...")
-    try:
-        queries_rows = fetch_hf_split(dataset_id, config="queries", split="queries")
-    except Exception:
-        queries_rows = fetch_hf_split(dataset_id, config="queries", split="test")
-    queries: Dict[str, str] = {}
-    for row in queries_rows:
-        qid = str(row["_id"])
-        if qid in qrels:
-            queries[qid] = str(row.get("text", ""))
-        if len(queries) >= QUERIES_PER_DATASET:
-            break
-
-    qrels = {qid: qrels[qid] for qid in queries}
-    return corpus, queries, qrels
+    """Loads corpus, queries, and qrels via CoIRLoader."""
+    print_step(f"Loading [{name}] via CoIRLoader...")
+    loader = CoIRLoader(
+        dataset=name,
+        max_queries=QUERIES_PER_DATASET,
+        max_corpus_docs=MAX_CORPUS_DOCS,
+    )
+    return loader.get_corpus(), loader.get_queries(), loader.get_qrels()
 
 
 # --- Index Building ---
@@ -146,20 +100,16 @@ def build_retriever(
     corpus: Dict[str, Dict[str, str]],
     qrels: Dict[str, Dict[str, int]],
 ) -> Tuple[LangChainRetriever, FAISS]:
-    """Builds a FAISS index over the corpus, preserving all gold documents."""
+    """Builds a FAISS index over the corpus (already capped with gold preserved by CoIRLoader)."""
     gold_ids: Set[str] = {did for doc_scores in qrels.values() for did in doc_scores}
-
-    lc_docs: List[Document] = []
-    included = 0
-    for doc_id, doc_data in corpus.items():
-        if included >= MAX_CORPUS_DOCS and doc_id not in gold_ids:
-            continue
-        text = doc_data.get("text", "")
-        title = doc_data.get("title", "")
-        page_content = f"{title}\n{text}".strip() if title else text
-        lc_docs.append(Document(page_content=page_content, metadata={"id": doc_id}))
-        included += 1
-
+    lc_docs: List[Document] = [
+        Document(
+            page_content=(f"{d.get('title')}\n{d.get('text', '')}".strip()
+                          if d.get("title") else d.get("text", "")),
+            metadata={"id": doc_id},
+        )
+        for doc_id, d in corpus.items()
+    ]
     print_step(f"Indexing {len(lc_docs)} documents (gold pool: {len(gold_ids)})...")
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBED_MODEL,
@@ -290,10 +240,10 @@ def main():
     all_rows: List[Dict] = []
 
     for dataset_name in DATASETS:
-        if dataset_name not in ALL_DATASETS:
+        if dataset_name not in COIR_DATASETS:
             _console.print(
                 f"[yellow]Unknown dataset '{dataset_name}', skipping. "
-                f"Valid: {ALL_DATASETS}[/yellow]"
+                f"Valid: {COIR_DATASETS}[/yellow]"
             )
             continue
 
