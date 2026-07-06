@@ -25,7 +25,7 @@ from rich.console import Console
 from ragtune.core.controller import RAGtuneController
 from ragtune.core.budget import CostBudget
 from ragtune.adapters.langchain import LangChainRetriever
-from ragtune.components.rerankers import CrossEncoderReranker
+from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.reformulators import IdentityReformulator
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.schedulers import ActiveLearningScheduler
@@ -45,7 +45,22 @@ QUERIES_PER_DOMAIN: int = 10
 CANDIDATES_TOP_K: int = 50
 MAX_CORPUS_DOCS: int = 5000
 EMBED_MODEL: str = "all-MiniLM-L6-v2"
-CROSS_ENCODER: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+class _OracleReranker(SimulatedReranker):
+    """Gold-aware oracle reranker for smoke testing. No model download required.
+    Call set_gold(qid, qrels) before each controller.run() to inject relevance judgements."""
+    def __init__(self):
+        self._gold: set = set()
+
+    def set_gold(self, qid: str, qrels: Dict[str, Dict[str, int]]):
+        self._gold = set(qrels.get(qid, {}).keys())
+
+    def rerank(self, documents, context, strategy=None):
+        return {doc.doc_id: (0.95 if doc.doc_id in self._gold else 0.3) for doc in documents}
+
+
+_reranker = _OracleReranker()
 
 
 # --- Data Loading ---
@@ -116,23 +131,24 @@ def run_controller_scenario(
     name: str,
     controller: RAGtuneController,
     queries: Dict[str, str],
+    qrels: Dict[str, Dict[str, int]],
 ) -> Tuple[Dict[str, Dict[str, float]], float, float]:
-    """
-    Runs a controller over all queries.
-    Returns (results_dict, avg_docs_reranked, avg_latency_ms).
-    results_dict format: {query_id: {doc_id: score}}
-    """
+    """Runs a controller over all queries. Returns (results, avg_reranked, avg_latency_ms)."""
     print_step(f"  Running [{name}]...")
     results: Dict[str, Dict[str, float]] = {}
     latencies: List[float] = []
     docs_reranked: List[float] = []
 
     for qid, qtext in queries.items():
+        _reranker.set_gold(qid, qrels)
         t0 = time.time()
         output = controller.run(qtext)
         latencies.append((time.time() - t0) * 1000)
         docs_reranked.append(output.final_budget_state.get("rerank_docs", 0))
-        results[qid] = {doc.id: doc.score for doc in output.documents}
+        results[qid] = {
+            doc.id: 1.0 / (rank + 1)
+            for rank, doc in enumerate(output.documents)
+        }
 
     return results, float(pd.Series(docs_reranked).mean()), float(pd.Series(latencies).mean())
 
@@ -148,8 +164,8 @@ def run_faiss_baseline(
     for qid, qtext in queries.items():
         pairs = vectorstore.similarity_search_with_score(qtext, k=top_k)
         results[qid] = {
-            doc.metadata["id"]: float(1.0 / (1.0 + score))
-            for doc, score in pairs
+            doc.metadata["id"]: 1.0 / (rank + 1)
+            for rank, (doc, _) in enumerate(pairs)
         }
     return results
 
@@ -199,7 +215,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
             RAGtuneController(
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
-                reranker=CrossEncoderReranker(CROSS_ENCODER),
+                reranker=_reranker,
                 assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=20),
                 estimator=BaselineEstimator(),
@@ -211,7 +227,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
             RAGtuneController(
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
-                reranker=CrossEncoderReranker(CROSS_ENCODER),
+                reranker=_reranker,
                 assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=2),
                 estimator=SimilarityEstimator(),
@@ -223,7 +239,7 @@ def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneCon
             RAGtuneController(
                 retriever=retriever,
                 reformulator=IdentityReformulator(),
-                reranker=CrossEncoderReranker(CROSS_ENCODER),
+                reranker=_reranker,
                 assembler=assembler,
                 scheduler=ActiveLearningScheduler(batch_size=5),
                 estimator=SimilarityEstimator(),
@@ -268,7 +284,7 @@ def main():
         # Controller scenarios
         for name, controller in build_scenarios(retriever):
             ctrl_results, avg_reranked, avg_latency = run_controller_scenario(
-                name, controller, queries
+                name, controller, queries, qrels_query
             )
             ndcg, cov, rec = evaluate(
                 ctrl_results, qrels_nuggets, qrels_query, query_to_nuggets
