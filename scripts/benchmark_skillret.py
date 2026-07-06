@@ -32,6 +32,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from rich.console import Console
 
 from ragtune.adapters.langchain import LangChainRetriever
+from ragtune.data.loaders.SKILLRETLoader import SKILLRETLoader
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.estimators import BaselineEstimator, SimilarityEstimator
 from ragtune.components.reformulators import IdentityReformulator
@@ -51,7 +52,6 @@ _evaluator = RetrievalEvaluator(k_values=[10, 50])
 
 # --- Configuration ---
 
-DATASET_ID = "ThakiCloud/SKILLRET"
 QUERIES_PER_RUN: int = int(os.environ.get("SKILLRET_QUERIES", "20"))
 CANDIDATES_TOP_K: int = 50
 EMBED_MODEL: str = "all-MiniLM-L6-v2"
@@ -75,54 +75,14 @@ _reranker = _OracleReranker()
 # --- Data Loading ---
 
 def load_data() -> Tuple[
-    Dict[str, str],             # corpus:  {skill_id: text}
+    Dict[str, str],             # corpus:  {skill_id: {"text": str, "title": str}}
     Dict[str, str],             # queries: {query_id: query_text}
     Dict[str, Dict[str, int]],  # qrels:   {query_id: {skill_id: relevance}}
 ]:
-    """
-    Loads skills, evaluation queries, and qrels from SKILLRET (test splits).
-    The full corpus (6,660 skills) is loaded without streaming since it fits
-    comfortably in memory.
-    """
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        raise ImportError(
-            "Required package missing. Install with:\n"
-            "  pip install datasets\n"
-            "Or: pip install -e '.[benchmarks]'"
-        )
-
-    # 1. Skills — full corpus, indexed as "name + description"
-    print_step("Loading skills corpus (test split)...")
-    skills_ds = load_dataset(DATASET_ID, "skills", split="test")
-    corpus: Dict[str, str] = {
-        row["id"]: f"{row['name']}\n\n{row['description']}"
-        for row in skills_ds
-    }
-
-    # 2. Evaluation queries — capped at QUERIES_PER_RUN
-    # streaming=True avoids a schema-cast error caused by train.jsonl having an
-    # extra 'original_query' column absent from test.jsonl; streaming reads the
-    # target split lazily without unifying schemas across all files in the config.
-    print_step(f"Loading evaluation queries (first {QUERIES_PER_RUN})...")
-    query_rows = []
-    for row in load_dataset(DATASET_ID, "queries", split="test", streaming=True):
-        query_rows.append(row)
-        if len(query_rows) >= QUERIES_PER_RUN:
-            break
-    queries: Dict[str, str] = {row["id"]: row["query"] for row in query_rows}
-
-    # 3. Qrels — load full test split, filter to our query subset
-    print_step("Loading qrels (test split)...")
-    query_ids = set(queries.keys())
-    qrels: Dict[str, Dict[str, int]] = {}
-    for row in load_dataset(DATASET_ID, "qrels", split="test"):
-        qid = row["query_id"]
-        if qid in query_ids and row["relevance"] > 0:
-            qrels.setdefault(qid, {})[row["skill_id"]] = int(row["relevance"])
-
-    return corpus, queries, qrels
+    """Loads skills corpus, queries, and qrels via SKILLRETLoader."""
+    print_step("Loading SKILLRET via SKILLRETLoader...")
+    loader = SKILLRETLoader(max_queries=QUERIES_PER_RUN)
+    return loader.get_corpus(), loader.get_queries(), loader.get_qrels()
 
 
 # --- Index Building ---
@@ -130,7 +90,8 @@ def load_data() -> Tuple[
 def build_retriever(corpus: Dict[str, str]) -> Tuple[LangChainRetriever, FAISS]:
     """Builds a FAISS index over all skills."""
     lc_docs = [
-        Document(page_content=text, metadata={"id": skill_id})
+        Document(page_content=text if isinstance(text, str) else text.get("text", ""),
+                 metadata={"id": skill_id})
         for skill_id, text in corpus.items()
     ]
     print_step(f"Indexing {len(lc_docs)} skills...")
