@@ -20,11 +20,9 @@ Usage:
     OBLIQ_TASKS=congress OBLIQ_QUERIES=50 python scripts/benchmark_obliq.py
 """
 
-import csv
-import json
 import os
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from langchain_community.vectorstores import FAISS
@@ -33,6 +31,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from rich.console import Console
 
 from ragtune.adapters.langchain import LangChainRetriever
+from ragtune.data.loaders.OBLIQLoader import OBLIQLoader, OBLIQ_TASKS
 from ragtune.components.assemblers import GreedyAssembler
 from ragtune.components.estimators import BaselineEstimator, SimilarityEstimator
 from ragtune.components.reformulators import IdentityReformulator
@@ -51,29 +50,6 @@ def print_step(msg):   _console.print(f"[dim]{msg}[/dim]")
 def print_success(msg): _console.print(f"[bold green]{msg}[/bold green]")
 
 # --- Configuration ---
-
-DATASET_ID = "dianetc/OBLIQ-Bench"
-
-# Maps HF config name → paths inside the repo for qrels and optional excluded_ids
-TASK_META: Dict[str, Dict] = {
-    "congress": {
-        "qrels_path": "tip-of-tongue/congress/queries+qrels/qrels.tsv",
-    },
-    "math": {
-        "qrels_path": "analogues/math/queries+qrels/qrels.tsv",
-        "excluded_ids_path": "analogues/math/queries+qrels/per_query_excluded_ids.json",
-    },
-    "writing": {
-        "qrels_path": "analogues/writing/queries+qrels/qrels.tsv",
-        "excluded_ids_path": "analogues/writing/queries+qrels/per_query_excluded_ids.json",
-    },
-    "twitter": {
-        "qrels_path": "descriptive/twitter/queries+qrels/qrels.tsv",
-    },
-    "wildchat": {
-        "qrels_path": "descriptive/wildchat/queries+qrels/qrels.tsv",
-    },
-}
 
 TASKS: List[str] = os.environ.get("OBLIQ_TASKS", "congress,math").split(",")
 QUERIES_PER_TASK: int = int(os.environ.get("OBLIQ_QUERIES", "20"))
@@ -99,78 +75,20 @@ _reranker = _OracleReranker()
 
 # --- Data Loading ---
 
-def _parse_qrels(path: str, query_filter: Set[str]) -> Dict[str, Dict[str, int]]:
-    """Parses a TREC-format qrels.tsv, keeping only queries in query_filter."""
-    qrels: Dict[str, Dict[str, int]] = {}
-    with open(path) as f:
-        reader = csv.reader(f, delimiter="\t")
-        for row in reader:
-            if len(row) < 3 or row[0] == "query-id":
-                continue
-            qid, did, score = row[0], row[1], int(row[2])
-            if qid in query_filter and score > 0:
-                qrels.setdefault(qid, {})[did] = score
-    return qrels
-
-
 def load_task(task: str) -> Tuple[
-    Dict[str, str],                 # corpus: {doc_id: text}
+    Dict[str, str],                 # corpus: {doc_id: {"text": str, "title": str}}
     Dict[str, str],                 # queries: {query_id: text}
     Dict[str, Dict[str, int]],      # qrels:   {query_id: {doc_id: score}}
     Optional[Dict[str, List[str]]], # excluded_ids per query, or None
 ]:
-    """Loads corpus, queries, qrels, and optional excluded_ids for a task."""
-    try:
-        from datasets import load_dataset
-        from huggingface_hub import hf_hub_download
-    except ImportError:
-        raise ImportError(
-            "Required packages missing. Install with:\n"
-            "  pip install datasets huggingface_hub\n"
-            "Or: pip install -e '.[benchmarks]'"
-        )
-
-    meta = TASK_META[task]
-
-    # 1. Queries (small — load fully, then slice)
-    print_step(f"Loading queries [{task}]...")
-    queries_rows = list(load_dataset(DATASET_ID, task, split="queries"))[:QUERIES_PER_TASK]
-    queries: Dict[str, str] = {row["_id"]: row["text"] for row in queries_rows}
-
-    # 2. Qrels (file download — parse only for our query subset)
-    print_step(f"Loading qrels [{task}]...")
-    qrels_file = hf_hub_download(
-        repo_id=DATASET_ID, repo_type="dataset", filename=meta["qrels_path"]
+    """Loads corpus, queries, qrels, and excluded_ids via OBLIQLoader."""
+    print_step(f"Loading [{task}] via OBLIQLoader...")
+    loader = OBLIQLoader(
+        task=task,
+        max_queries=QUERIES_PER_TASK,
+        max_corpus_docs=MAX_CORPUS_DOCS,
     )
-    qrels = _parse_qrels(qrels_file, set(queries.keys()))
-
-    # 3. Corpus (streamed — cap at MAX_CORPUS_DOCS but always include gold docs)
-    gold_ids: Set[str] = {did for doc_scores in qrels.values() for did in doc_scores}
-    print_step(f"Streaming corpus [{task}] (cap={MAX_CORPUS_DOCS}, gold={len(gold_ids)})...")
-    corpus: Dict[str, str] = {}
-    non_gold_count = 0
-    corpus_ds = load_dataset(DATASET_ID, task, split="corpus", streaming=True)
-    for row in corpus_ds:
-        doc_id = row["_id"]
-        is_gold = doc_id in gold_ids
-        if is_gold or non_gold_count < MAX_CORPUS_DOCS:
-            corpus[doc_id] = row["text"]
-            if not is_gold:
-                non_gold_count += 1
-        # Stop once we've collected enough non-gold docs and all gold docs are found
-        if non_gold_count >= MAX_CORPUS_DOCS and gold_ids.issubset(corpus):
-            break
-
-    # 4. Excluded IDs (math & writing only — mask these at eval time)
-    excluded_ids: Optional[Dict[str, List[str]]] = None
-    if "excluded_ids_path" in meta:
-        excl_file = hf_hub_download(
-            repo_id=DATASET_ID, repo_type="dataset", filename=meta["excluded_ids_path"]
-        )
-        with open(excl_file) as f:
-            excluded_ids = json.load(f)
-
-    return corpus, queries, qrels, excluded_ids
+    return loader.get_corpus(), loader.get_queries(), loader.get_qrels(), loader.get_excluded_ids()
 
 
 # --- Index Building ---
@@ -181,7 +99,8 @@ def build_retriever(
 ) -> Tuple[LangChainRetriever, FAISS]:
     """Builds a FAISS index over the corpus."""
     lc_docs = [
-        Document(page_content=text, metadata={"id": doc_id})
+        Document(page_content=text if isinstance(text, str) else text.get("text", ""),
+                 metadata={"id": doc_id})
         for doc_id, text in corpus.items()
     ]
     print_step(f"Indexing {len(lc_docs)} documents...")
@@ -321,10 +240,10 @@ def main():
     all_rows: List[Dict] = []
 
     for task in TASKS:
-        if task not in TASK_META:
+        if task not in OBLIQ_TASKS:
             _console.print(
                 f"[yellow]Unknown task '{task}', skipping. "
-                f"Valid: {list(TASK_META)}[/yellow]"
+                f"Valid: {OBLIQ_TASKS}[/yellow]"
             )
             continue
 
