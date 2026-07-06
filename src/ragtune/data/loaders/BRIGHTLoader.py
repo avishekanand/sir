@@ -35,13 +35,13 @@ Reference: https://huggingface.co/datasets/xlangai/BRIGHT
 import logging
 from typing import Dict, List, Optional
 
-from src.ragtune.data.loaders.BaseDataLoader import BaseDataLoader
-from src.ragtune.data.loaders.HuggingFaceLoader import fetch_hf_split, populate_corpus, build_raw_data
-from src.ragtune.data.loaders.IRDatasetsLoader import load_from_irds
-from src.ragtune.data.datastructures.query import Query
-from src.ragtune.data.datastructures.context import Context
-from src.ragtune.data.datastructures.sample import Sample
-from src.ragtune.data.constants import BRIGHT_TASKS, HFDatasets, Split
+from ragtune.data.loaders.BaseDataLoader import BaseDataLoader
+from ragtune.data.loaders.HuggingFaceLoader import fetch_hf_split, populate_corpus, build_raw_data
+from ragtune.data.loaders.IRDatasetsLoader import load_from_irds
+from ragtune.data.datastructures.query import Query
+from ragtune.data.datastructures.context import Context
+from ragtune.data.datastructures.sample import Sample
+from ragtune.data.constants import BRIGHT_TASKS, HFDatasets, Split
 
 logger = logging.getLogger(__name__)
 

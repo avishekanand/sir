@@ -32,10 +32,10 @@ FreshStackLoader so that HF access logic is never duplicated:
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.ragtune.data.loaders.BaseDataLoader import BaseDataLoader
-from src.ragtune.data.datastructures.query import Query
-from src.ragtune.data.datastructures.context import Context
-from src.ragtune.data.datastructures.sample import Sample
+from ragtune.data.loaders.BaseDataLoader import BaseDataLoader
+from ragtune.data.datastructures.query import Query
+from ragtune.data.datastructures.context import Context
+from ragtune.data.datastructures.sample import Sample
 
 logger = logging.getLogger(__name__)
 
