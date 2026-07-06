@@ -9,8 +9,8 @@ pipeline can consume it without modification.
 
 Usage
 -----
-    from src.ragtune.data.loaders.RetrieverDataset import RetrieverDataset
-    from src.ragtune.data.constants import Benchmark, Dataset, Split
+    from ragtune.data.loaders.RetrieverDataset import RetrieverDataset
+    from ragtune.data.constants import Benchmark, Dataset, Split
 
     rd = RetrieverDataset(
         dataset=Dataset.BIOLOGY,
@@ -23,9 +23,9 @@ Usage
 import logging
 from typing import Dict, List, Optional, Tuple
 
-from src.ragtune.data.constants import Benchmark, Split
-from src.ragtune.data.datastructures import Query, Context
-from src.ragtune.data.loaders.DataLoaderFactory import DataLoaderFactory
+from ragtune.data.constants import Benchmark, Split
+from ragtune.data.datastructures import Query, Context
+from ragtune.data.loaders.DataLoaderFactory import DataLoaderFactory
 
 logger = logging.getLogger(__name__)
 
