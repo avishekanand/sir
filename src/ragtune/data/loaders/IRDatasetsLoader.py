@@ -17,10 +17,10 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from src.ragtune.data.loaders.BaseDataLoader import BaseDataLoader
-from src.ragtune.data.datastructures.query import Query
-from src.ragtune.data.datastructures.context import Context
-from src.ragtune.data.datastructures.sample import Sample
+from ragtune.data.loaders.BaseDataLoader import BaseDataLoader
+from ragtune.data.datastructures.query import Query
+from ragtune.data.datastructures.context import Context
+from ragtune.data.datastructures.sample import Sample
 
 logger = logging.getLogger(__name__)
 
