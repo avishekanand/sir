@@ -1,8 +1,8 @@
 from typing import Optional
 
-from src.ragtune.data.datastructures.answer import Answer
-from src.ragtune.data.datastructures.context import Context
-from src.ragtune.data.datastructures.query import Query
+from ragtune.data.datastructures.answer import Answer
+from ragtune.data.datastructures.context import Context
+from ragtune.data.datastructures.query import Query
 
 
 class Sample:
