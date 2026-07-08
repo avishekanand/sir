@@ -14,6 +14,7 @@ class Benchmark:
     BRIGHT = "BRIGHT"
     BEIR = "beir"
     FRESHSTACK = "freshstack"
+    CRUMB = "CRUMB"
 
 
 class Dataset:
@@ -47,6 +48,16 @@ class Dataset:
     OTTQA = "ottqa"
     STRATEGYQA = "strategyqa"
 
+    # CRUMB tasks
+    PAPER_RETRIEVAL = "paper_retrieval"
+    THEOREM_RETRIEVAL = "theorem_retrieval"
+    TIP_OF_THE_TONGUE = "tip_of_the_tongue"
+    STACK_EXCHANGE = "stack_exchange"
+    CLINICAL_TRIAL = "clinical_trial"
+    SET_OPERATION_ENTITY_RETRIEVAL = "set_operation_entity_retrieval"
+    CODE_RETRIEVAL = "code_retrieval"
+    LEGAL_QA = "legal_qa"
+
 
 # All BRIGHT task names as a list for easy iteration
 BRIGHT_TASKS = [
@@ -71,6 +82,18 @@ FRESHSTACK_TOPICS = [
     Dataset.ANGULAR,
     Dataset.LARAVEL,
     Dataset.GODOT,
+]
+
+# All CRUMB task names as a list for easy iteration
+CRUMB_TASKS = [
+    Dataset.PAPER_RETRIEVAL,
+    Dataset.THEOREM_RETRIEVAL,
+    Dataset.TIP_OF_THE_TONGUE,
+    Dataset.STACK_EXCHANGE,
+    Dataset.CLINICAL_TRIAL,
+    Dataset.SET_OPERATION_ENTITY_RETRIEVAL,
+    Dataset.CODE_RETRIEVAL,
+    Dataset.LEGAL_QA,
 ]
 
 

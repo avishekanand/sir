@@ -78,6 +78,21 @@ class DataLoaderFactory:
                 cache_dir=cache_dir,
             )
 
+        # ---- CRUMB ----
+        # Unlike BRIGHT/FreshStack, CRUMB task names (e.g. "legal_qa") are
+        # generic enough that they could collide with a task name in another
+        # benchmark, so dispatch requires an explicit benchmark_name="CRUMB"
+        # rather than falling back to a dataset_name-only match.
+        if benchmark_name == Benchmark.CRUMB:
+            from ragtune.data.loaders.CRUMBLoader import CRUMBLoader
+            logger.info(f"[Factory] Creating CRUMBLoader(task={dataset_name!r})")
+            return CRUMBLoader(
+                task=dataset_name,
+                split=split,
+                cache_dir=cache_dir,
+                **kwargs,
+            )
+
         # ---- BEIR via HuggingFace (mteb mirror) ----
         if benchmark_name == Benchmark.BEIR.upper():
             hf_name = kwargs.pop("hf_dataset_name", f"mteb/{dataset_name}")

@@ -19,28 +19,18 @@ Reference: https://huggingface.co/datasets/jfkback/crumb
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from ragtune.data.loaders.BaseDataLoader import BaseDataLoader
 from ragtune.data.loaders.HuggingFaceLoader import fetch_hf_split, build_raw_data
 from ragtune.data.datastructures.query import Query
 from ragtune.data.datastructures.context import Context
 from ragtune.data.datastructures.sample import Sample
+from ragtune.data.constants import CRUMB_TASKS
 
 logger = logging.getLogger(__name__)
 
 DATASET_ID = "jfkback/crumb"
-
-CRUMB_TASKS: List[str] = [
-    "paper_retrieval",
-    "theorem_retrieval",
-    "tip_of_the_tongue",
-    "stack_exchange",
-    "clinical_trial",
-    "set_operation_entity_retrieval",
-    "code_retrieval",
-    "legal_qa",
-]
 
 
 class CRUMBLoader(BaseDataLoader):
