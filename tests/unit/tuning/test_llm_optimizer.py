@@ -12,8 +12,13 @@ from ragtune.tuning.llm_optimizer import (
     LLMAgentOptimizer,
     LLMCandidate,
     LLMOptimizerConfig,
+    TraceAggregate,
+    EvalResult,
     compute_pareto_front,
     evaluate_controller,
+    _compute_param_correlations,
+    _extract_query_trace,
+    _aggregate_traces,
 )
 from ragtune.tuning.search_space import RAGtuneSearchSpace
 
@@ -267,6 +272,21 @@ def _good_params() -> Dict[str, Any]:
     return {k: v for k, v in _make_candidate().params.items()}
 
 
+def _make_eval_result(ndcg=0.5, cost=20.0) -> EvalResult:
+    from ragtune.tuning.evaluator import TrialObjectives
+    return EvalResult(
+        objectives=TrialObjectives(ndcg_at_10=ndcg, rerank_docs=cost, latency_ms=100.0, queries_evaluated=5),
+        trace=TraceAggregate(
+            avg_pool_size=30.0,
+            avg_pct_pool_reranked=0.6,
+            feedback_stop_rate=0.1,
+            retrieval_skip_rate=0.0,
+            avg_rewrite_utility=0.2,
+            avg_rerank_errors=0.0,
+        ),
+    )
+
+
 def test_run_returns_history_of_correct_length():
     opt = _make_optimizer()
 
@@ -274,11 +294,7 @@ def test_run_returns_history_of_correct_length():
         patch("ragtune.tuning.llm_optimizer.evaluate_controller") as mock_eval,
         patch.object(opt, "_propose", return_value=(_good_params(), "test rationale")),
     ):
-        from ragtune.tuning.evaluator import TrialObjectives
-        mock_eval.return_value = TrialObjectives(
-            ndcg_at_10=0.5, rerank_docs=20.0, latency_ms=100.0, queries_evaluated=5
-        )
-
+        mock_eval.return_value = _make_eval_result()
         fake_retriever = MagicMock()
         fake_dataset = MagicMock()
         fake_dataset.queries = [MagicMock() for _ in range(5)]
@@ -286,6 +302,23 @@ def test_run_returns_history_of_correct_length():
         history = opt.run(fake_retriever, fake_dataset)
 
     assert len(history) == opt.config.n_iterations
+
+
+def test_run_stores_trace_in_candidate():
+    opt = _make_optimizer()
+
+    with (
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller") as mock_eval,
+        patch.object(opt, "_propose", return_value=(_good_params(), "test")),
+    ):
+        mock_eval.return_value = _make_eval_result(ndcg=0.7, cost=15.0)
+        fake_retriever = MagicMock()
+        fake_dataset = MagicMock()
+        fake_dataset.queries = [MagicMock()]
+        history = opt.run(fake_retriever, fake_dataset)
+
+    assert all(c.trace is not None for c in history if not c.error)
+    assert history[0].trace.avg_pool_size == 30.0
 
 
 def test_run_records_error_on_build_failure():
@@ -296,7 +329,6 @@ def test_run_records_error_on_build_failure():
         patch.object(opt, "_propose", return_value=(_good_params(), "test")),
     ):
         mock_build.side_effect = RuntimeError("component not found")
-
         fake_retriever = MagicMock()
         fake_dataset = MagicMock()
         fake_dataset.queries = [MagicMock() for _ in range(5)]
@@ -326,16 +358,170 @@ def test_run_writes_pareto_files(tmp_path):
         patch("ragtune.tuning.llm_optimizer.evaluate_controller") as mock_eval,
         patch.object(opt, "_propose", return_value=(_good_params(), "rationale")),
     ):
-        from ragtune.tuning.evaluator import TrialObjectives
-        mock_eval.return_value = TrialObjectives(
-            ndcg_at_10=0.6, rerank_docs=25.0, latency_ms=50.0, queries_evaluated=2
-        )
-
+        mock_eval.return_value = _make_eval_result(ndcg=0.6, cost=25.0)
         fake_retriever = MagicMock()
         fake_dataset = MagicMock()
         fake_dataset.queries = [MagicMock(), MagicMock()]
-
         opt.run(fake_retriever, fake_dataset)
 
     yaml_files = list((tmp_path / "out").glob("*.yaml"))
     assert len(yaml_files) >= 1
+
+
+# ── TraceAggregate extraction ─────────────────────────────────────────────────
+
+def _make_mock_output(events_spec: List[Dict]) -> MagicMock:
+    """Build a fake ControllerOutput with specified trace events."""
+    from ragtune.core.types import TraceEvent
+    events = []
+    for spec in events_spec:
+        ev = MagicMock()
+        ev.action = spec["action"]
+        ev.details = spec.get("details", {})
+        events.append(ev)
+    output = MagicMock()
+    output.trace.events = events
+    output.final_budget_state = {"rerank_docs": 20.0}
+    output.documents = []
+    return output
+
+
+def test_extract_query_trace_pool_init():
+    output = _make_mock_output([
+        {"action": "pool_init", "details": {"count": 40, "metrics": {"rewrite_utility_ratio": 0.25}}},
+        {"action": "rerank_batch", "details": {"count": 10}},
+        {"action": "rerank_batch", "details": {"count": 10}},
+    ])
+    sig = _extract_query_trace(output)
+    assert sig["pool_size"] == 40
+    assert sig["pct_pool_reranked"] == pytest.approx(0.5)
+    assert sig["rewrite_utility"] == pytest.approx(0.25)
+    assert sig["feedback_stop"] is False
+
+
+def test_extract_query_trace_feedback_stop():
+    output = _make_mock_output([
+        {"action": "pool_init", "details": {"count": 20, "metrics": {}}},
+        {"action": "feedback_stop"},
+    ])
+    sig = _extract_query_trace(output)
+    assert sig["feedback_stop"] is True
+
+
+def test_extract_query_trace_retrieval_skip():
+    output = _make_mock_output([
+        {"action": "pool_init", "details": {"count": 10, "metrics": {}}},
+        {"action": "retrieval_skipped"},
+    ])
+    sig = _extract_query_trace(output)
+    assert sig["retrieval_skip"] is True
+
+
+def test_aggregate_traces_averages():
+    per_query = [
+        {"pool_size": 30, "pct_pool_reranked": 0.5, "feedback_stop": True,
+         "retrieval_skip": False, "rewrite_utility": 0.2, "rerank_errors": 0},
+        {"pool_size": 50, "pct_pool_reranked": 0.8, "feedback_stop": False,
+         "retrieval_skip": True, "rewrite_utility": 0.4, "rerank_errors": 1},
+    ]
+    agg = _aggregate_traces(per_query)
+    assert agg.avg_pool_size == pytest.approx(40.0)
+    assert agg.avg_pct_pool_reranked == pytest.approx(0.65)
+    assert agg.feedback_stop_rate == pytest.approx(0.5)
+    assert agg.retrieval_skip_rate == pytest.approx(0.5)
+    assert agg.avg_rewrite_utility == pytest.approx(0.3)
+    assert agg.avg_rerank_errors == pytest.approx(0.5)
+
+
+def test_aggregate_traces_empty():
+    agg = _aggregate_traces([])
+    assert agg.avg_pool_size == 0
+
+
+# ── Parameter correlation ─────────────────────────────────────────────────────
+
+def test_param_correlations_basic():
+    history = [
+        _make_candidate(iteration=1, ndcg=0.7, cost=20.0, reranker_type="cross-encoder"),
+        _make_candidate(iteration=2, ndcg=0.6, cost=25.0, reranker_type="cross-encoder"),
+        _make_candidate(iteration=3, ndcg=0.3, cost=5.0, reranker_type="noop"),
+        _make_candidate(iteration=4, ndcg=0.35, cost=6.0, reranker_type="noop"),
+    ]
+    corr = _compute_param_correlations(history)
+    assert "reranker_type" in corr
+    assert "cross-encoder" in corr["reranker_type"]
+    assert "noop" in corr["reranker_type"]
+    ce_ndcg = corr["reranker_type"]["cross-encoder"][0]
+    noop_ndcg = corr["reranker_type"]["noop"][0]
+    assert ce_ndcg > noop_ndcg
+
+
+def test_param_correlations_excludes_single_obs():
+    history = [
+        _make_candidate(iteration=1, ndcg=0.7, cost=20.0, reranker_type="cross-encoder"),
+        _make_candidate(iteration=2, ndcg=0.3, cost=5.0, reranker_type="noop"),
+        _make_candidate(iteration=3, ndcg=0.35, cost=6.0, reranker_type="noop"),
+    ]
+    corr = _compute_param_correlations(history)
+    # cross-encoder has only 1 obs — should be excluded
+    assert "cross-encoder" not in corr.get("reranker_type", {})
+    assert "noop" in corr["reranker_type"]
+
+
+def test_param_correlations_excludes_errored():
+    history = [
+        _make_candidate(iteration=1, ndcg=0.0, cost=0.0, error="crash", reranker_type="cross-encoder"),
+        _make_candidate(iteration=2, ndcg=0.0, cost=0.0, error="crash", reranker_type="cross-encoder"),
+        _make_candidate(iteration=3, ndcg=0.4, cost=10.0, reranker_type="noop"),
+        _make_candidate(iteration=4, ndcg=0.45, cost=12.0, reranker_type="noop"),
+    ]
+    corr = _compute_param_correlations(history)
+    assert "cross-encoder" not in corr.get("reranker_type", {})
+
+
+# ── _build_user_message enrichment ────────────────────────────────────────────
+
+def test_user_message_includes_trace_diagnostics():
+    opt = _make_optimizer()
+    trace = TraceAggregate(
+        avg_pool_size=40.0, avg_pct_pool_reranked=0.45,
+        feedback_stop_rate=0.2, retrieval_skip_rate=0.1,
+        avg_rewrite_utility=0.05, avg_rerank_errors=0.0,
+    )
+    c = _make_candidate(iteration=1, ndcg=0.6, cost=20.0)
+    c.trace = trace
+    history = [c]
+    pareto = compute_pareto_front(history)
+    msg = opt._build_user_message(history, pareto)
+    assert "pool=" in msg
+    assert "reranked=" in msg or "rnk%" in msg
+
+
+def test_user_message_includes_rationale_replay():
+    opt = _make_optimizer()
+    c = _make_candidate(iteration=1, ndcg=0.6, cost=20.0)
+    c.rationale = "I chose cross-encoder because it has higher accuracy"
+    history = [c]
+    pareto = compute_pareto_front(history)
+    msg = opt._build_user_message(history, pareto)
+    assert "I chose cross-encoder" in msg
+
+
+def test_user_message_includes_param_trends_when_enough_history():
+    opt = _make_optimizer()
+    history = [
+        _make_candidate(iteration=i, ndcg=0.5 + i * 0.01, cost=20.0, reranker_type="noop")
+        for i in range(5)
+    ]
+    pareto = compute_pareto_front(history)
+    msg = opt._build_user_message(history, pareto)
+    assert "Parameter trends" in msg
+
+
+def test_user_message_includes_diagnosis_hints():
+    opt = _make_optimizer()
+    history = [_make_candidate(iteration=1, ndcg=0.5, cost=20.0)]
+    pareto = compute_pareto_front(history)
+    msg = opt._build_user_message(history, pareto)
+    assert "Diagnostic interpretation" in msg
+    assert "pct_pool_reranked < 50%" in msg

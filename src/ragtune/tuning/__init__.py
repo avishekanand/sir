@@ -7,6 +7,8 @@ from ragtune.tuning.llm_optimizer import (
     LLMOptimizerConfig,
     LLMAgentOptimizer,
     LLMCandidate,
+    TraceAggregate,
+    EvalResult,
     compute_pareto_front,
     evaluate_controller,
 )
@@ -28,6 +30,8 @@ __all__ = [
     "LLMOptimizerConfig",
     "LLMAgentOptimizer",
     "LLMCandidate",
+    "TraceAggregate",
+    "EvalResult",
     "compute_pareto_front",
     "evaluate_controller",
 ]
