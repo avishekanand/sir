@@ -138,6 +138,116 @@ def tune_run(
     console.print(f"\n[bold green]Done.[/bold green] Pareto configs written to: {cfg.output_dir}/")
 
 
+@tune_app.command("llm-run")
+def tune_llm_run(
+    config_yaml: Path = typer.Argument(..., help="Path to LLM optimizer config YAML."),
+    retriever_index: Optional[str] = typer.Option(
+        None, "--index", "-i", help="PyTerrier index path for the fixed retriever."
+    ),
+    n_iterations: Optional[int] = typer.Option(
+        None, "--n-iterations", help="Override n_iterations from config."
+    ),
+    n_queries: Optional[int] = typer.Option(
+        None, "--n-queries", help="Override n_eval_queries from config."
+    ),
+    model: Optional[str] = typer.Option(
+        None, "--model", "-m", help="Override llm_model (any litellm-compatible name)."
+    ),
+):
+    """
+    Run LLM-agent-based optimization of the RAGtune pipeline.
+
+    The agent reflects on the evaluation history and Pareto front after each
+    iteration and proposes a new configuration to evaluate.
+
+    Example
+    -------
+    ragtune tune llm-run examples/tune_trec_covid_llm.yaml --index ./index
+    """
+    if not config_yaml.exists():
+        console.print(f"[bold red]Error:[/bold red] Config file not found: {config_yaml}")
+        raise typer.Exit(code=1)
+
+    from ragtune.tuning.llm_optimizer import LLMOptimizerConfig, LLMAgentOptimizer, compute_pareto_front
+
+    try:
+        cfg = LLMOptimizerConfig.from_yaml(str(config_yaml))
+    except Exception as exc:
+        console.print(f"[bold red]Config error:[/bold red] {exc}")
+        raise typer.Exit(code=1)
+
+    if n_iterations is not None:
+        cfg.n_iterations = n_iterations
+    if n_queries is not None:
+        cfg.n_eval_queries = n_queries
+    if model is not None:
+        cfg.llm_model = model
+
+    # ── Build fixed retriever ─────────────────────────────────────────────────
+    index_path = retriever_index or cfg.search_space_overrides.get("index_path")
+    if index_path is None:
+        console.print(
+            "[bold red]Error:[/bold red] No retriever index provided.\n"
+            "Pass --index <path> or set index_path in search_space_overrides."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        fixed_retriever = _build_pyterrier_retriever(index_path)
+    except Exception as exc:
+        console.print(f"[bold red]Retriever error:[/bold red] {exc}")
+        raise typer.Exit(code=1)
+
+    # ── Load eval dataset ─────────────────────────────────────────────────────
+    try:
+        eval_dataset = _load_llm_dataset(cfg)
+    except Exception as exc:
+        console.print(f"[bold red]Dataset error:[/bold red] {exc}")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold green]Starting LLM optimizer:[/bold green] {cfg.name}")
+    console.print(f"  Model:      {cfg.llm_model}")
+    console.print(f"  Dataset:    {eval_dataset.name} ({len(eval_dataset.queries)} queries)")
+    console.print(f"  Iterations: {cfg.n_iterations}")
+    console.print(f"  Output:     {cfg.output_dir}/")
+
+    # ── Run ───────────────────────────────────────────────────────────────────
+    optimizer = LLMAgentOptimizer(config=cfg)
+    try:
+        history = optimizer.run(fixed_retriever, eval_dataset)
+    except Exception as exc:
+        console.print(f"[bold red]Optimizer error:[/bold red] {exc}")
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(code=1)
+
+    # ── Report ────────────────────────────────────────────────────────────────
+    pareto = compute_pareto_front(history)
+    table = Table(title="LLM Agent Pareto Front", show_header=True, header_style="bold blue")
+    table.add_column("Iter", style="dim")
+    table.add_column("NDCG@10", justify="right")
+    table.add_column("Mean Rerank Docs", justify="right")
+    table.add_column("Reranker")
+    table.add_column("Scheduler")
+
+    for c in sorted(pareto, key=lambda x: -x.ndcg_at_10):
+        table.add_row(
+            str(c.iteration),
+            f"{c.ndcg_at_10:.4f}",
+            f"{c.mean_rerank_docs:.1f}",
+            c.params.get("reranker_type", "?"),
+            c.params.get("scheduler_type", "?"),
+        )
+
+    console.print(table)
+    console.print(f"\n[bold green]Done.[/bold green] Pareto configs written to: {cfg.output_dir}/")
+    console.print(
+        f"History: {len(history)} iterations, "
+        f"{sum(1 for c in history if not c.error)} successful, "
+        f"{sum(1 for c in history if c.error)} errored."
+    )
+
+
 @tune_app.command("show")
 def tune_show(
     storage_url: str = typer.Argument(..., help="Optuna storage URL (e.g. sqlite:///path.db)."),
@@ -217,6 +327,30 @@ def _load_dataset(cfg: object) -> object:
         irds_id = _IRDS_ALIASES.get(dataset_cfg.name)
         if irds_id is None:
             irds_id = dataset_cfg.name  # pass through as-is
+
+    return EvalDataset.from_pyterrier_irds(
+        irds_id=irds_id,
+        n_queries=cfg.n_eval_queries,
+        seed=cfg.seed,
+    )
+
+
+_IRDS_ALIASES = {
+    "trec-covid": "irds:beir/trec-covid",
+    "nfcorpus":   "irds:beir/nfcorpus",
+    "scifact":    "irds:beir/scifact",
+    "fiqa":       "irds:beir/fiqa",
+    "arguana":    "irds:beir/arguana",
+}
+
+
+def _load_llm_dataset(cfg: object) -> object:
+    from ragtune.tuning.evaluator import EvalDataset
+    from ragtune.tuning.llm_optimizer import LLMOptimizerConfig
+
+    assert isinstance(cfg, LLMOptimizerConfig)
+    dataset_info = cfg.dataset  # Dict[str, Any]
+    irds_id = dataset_info.get("irds_id") or _IRDS_ALIASES.get(dataset_info.get("name", "")) or dataset_info.get("name", "")
 
     return EvalDataset.from_pyterrier_irds(
         irds_id=irds_id,

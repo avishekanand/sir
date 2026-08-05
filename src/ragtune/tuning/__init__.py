@@ -3,8 +3,16 @@ from ragtune.tuning.search_space import RAGtuneSearchSpace
 from ragtune.tuning.evaluator import TrialEvaluator, EvalDataset, EvalQuery
 from ragtune.tuning.pruners import CostPruner, RuntimePruner, ParetoPruner
 from ragtune.tuning.optimizer import run_study, extract_pareto_configs
+from ragtune.tuning.llm_optimizer import (
+    LLMOptimizerConfig,
+    LLMAgentOptimizer,
+    LLMCandidate,
+    compute_pareto_front,
+    evaluate_controller,
+)
 
 __all__ = [
+    # Bayesian (Optuna) optimizer
     "TuningStudyConfig",
     "DatasetConfig",
     "RAGtuneSearchSpace",
@@ -16,4 +24,10 @@ __all__ = [
     "ParetoPruner",
     "run_study",
     "extract_pareto_configs",
+    # LLM-agent optimizer
+    "LLMOptimizerConfig",
+    "LLMAgentOptimizer",
+    "LLMCandidate",
+    "compute_pareto_front",
+    "evaluate_controller",
 ]

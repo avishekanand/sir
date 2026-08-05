@@ -1,0 +1,41 @@
+name: llm-agent-trec-covid-v1
+
+# LLM used for reflection and proposal (any litellm-compatible model string)
+llm_model: gpt-4o-mini
+temperature: 0.7
+
+# How many prior iterations the agent sees in its prompt
+max_history_in_prompt: 20
+
+# Optimization budget
+n_iterations: 30
+
+# Evaluation settings
+n_eval_queries: 50
+seed: 42
+
+# Dataset (ir-datasets BEIR TREC-COVID)
+dataset:
+  name: trec-covid
+  irds_id: irds:beir/trec-covid
+
+# Output directory for Pareto-optimal YAML configs
+output_dir: tuning_results_llm
+
+# Restrict search space to components that don't require API keys.
+# Remove or expand these to enable LLM-based rerankers / reformulators.
+search_space_overrides:
+  reranker_types:
+    - noop
+    - cross-encoder
+  reformulator_types:
+    - identity
+  estimator_types:
+    - baseline
+    - utility
+    - similarity
+  scheduler_types:
+    - graceful-degradation
+  feedback_types:
+    - none
+    - budget-stop

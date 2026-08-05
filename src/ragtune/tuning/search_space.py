@@ -283,3 +283,73 @@ class RAGtuneSearchSpace(BaseModel):
         elif ftype == "reformir-convergence":
             kwargs["convergence_threshold"] = params.get("reformir_convergence_threshold", 0.01)
         return cls(**kwargs)
+
+    def to_pipeline_dict(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert flat params dict to a PipelineConfig-compatible nested dict."""
+        reranker_type = params.get("reranker_type", "noop")
+        reranker_params: Dict[str, Any] = {}
+        if reranker_type == "cross-encoder":
+            reranker_params["model_name"] = params.get("ce_model", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        elif reranker_type == "monot5":
+            reranker_params["model_name"] = params.get("monot5_model", "castorini/monot5-base-msmarco")
+            reranker_params["batch_size"] = int(params.get("monot5_batch_size", 16))
+        elif reranker_type == "llm":
+            reranker_params["model_name"] = params.get("llm_reranker_model", "gpt-4o-mini")
+
+        reformulator_type = params.get("reformulator_type", "identity")
+        reformulator_params: Dict[str, Any] = {}
+        if reformulator_type == "llm_rewrite":
+            reformulator_params["model_name"] = params.get("reformulator_model", "gpt-4o-mini")
+        elif reformulator_type == "reformir":
+            reformulator_params["model"] = params.get("reformulator_model", "gpt-4o-mini")
+            reformulator_params["n_variants"] = params.get("reformulator_n_variants", 5)
+
+        estimator_type = params.get("estimator_type", "baseline")
+        estimator_params: Dict[str, Any] = {}
+        if estimator_type == "similarity":
+            estimator_params["model_name"] = params.get("similarity_model", "all-MiniLM-L6-v2")
+        elif estimator_type == "reformir":
+            estimator_params["min_reranked_for_regression"] = params.get("min_reranked_for_regression", 3)
+
+        scheduler_type = params.get("scheduler_type", "graceful-degradation")
+        scheduler_params: Dict[str, Any] = {"batch_size": params.get("scheduler_batch_size", 5)}
+        if scheduler_type == "graceful-degradation":
+            scheduler_params["llm_limit"] = params.get("gd_llm_limit", 3)
+            scheduler_params["cross_encoder_limit"] = params.get("gd_ce_limit", 10)
+
+        feedback_type = params.get("feedback_type", "none")
+        feedback_cfg: Optional[Dict[str, Any]] = None
+        if feedback_type != "none":
+            fb_params: Dict[str, Any] = {}
+            if feedback_type == "budget-stop":
+                fb_params["token_threshold"] = params.get("budget_stop_token_threshold", 0.9)
+            feedback_cfg = {"type": feedback_type, "params": fb_params}
+
+        pipeline: Dict[str, Any] = {
+            "name": "ragtune-pareto-config",
+            "components": {
+                "retriever": {"type": "pyterrier"},
+                "reformulator": {"type": reformulator_type, "params": reformulator_params},
+                "reranker": {"type": reranker_type, "params": reranker_params},
+                "estimator": {"type": estimator_type, "params": estimator_params},
+                "scheduler": {"type": scheduler_type, "params": scheduler_params},
+                "assembler": {
+                    "type": "greedy",
+                    "params": {"max_docs": params.get("assembler_max_docs", 10)},
+                },
+            },
+            "budget": {
+                "limits": {
+                    "rerank_docs": params.get("budget_rerank_docs", 50),
+                    "reformulations": params.get("budget_reformulations", 1),
+                    "retrieval_calls": 20,
+                    "tokens": 100000,
+                    "latency_ms": 30000,
+                }
+            },
+        }
+
+        if feedback_cfg:
+            pipeline["feedback"] = feedback_cfg
+
+        return pipeline
