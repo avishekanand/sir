@@ -36,12 +36,15 @@ class PyTerrierRetriever(BaseRetriever):
                 if os.path.exists(props_path):
                     abs_path = props_path
 
-            # Use the more modern and reliable Retriever loader
+            # Request text from the meta index so downstream rerankers get content.
             try:
-                self.pt_transformer = pt.terrier.Retriever(abs_path, wmodel="BM25")
+                self.pt_transformer = pt.terrier.Retriever(
+                    abs_path, wmodel="BM25", metadata=["docno", "text"]
+                )
             except Exception:
-                # Fallback to BatchRetrieve
-                self.pt_transformer = pt.BatchRetrieve(abs_path, wmodel="BM25")
+                self.pt_transformer = pt.BatchRetrieve(
+                    abs_path, wmodel="BM25", metadata=["docno", "text"]
+                )
         else:
             raise ValueError("Either pt_transformer or index_path must be provided.")
 
