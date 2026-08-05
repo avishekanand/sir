@@ -1,4 +1,4 @@
-name: llm-agent-trec-covid-v1
+name: trec-covid-llm-v1
 
 # LLM used for reflection and proposal (any litellm-compatible model string)
 llm_model: gpt-4o-mini
@@ -20,14 +20,15 @@ dataset:
   irds_id: irds:beir/trec-covid
 
 # Output directory for Pareto-optimal YAML configs
-output_dir: tuning_results_llm
+output_dir: tuning_results/trec-covid-llm-v1
 
-# Restrict search space to components that don't require API keys.
-# Remove or expand these to enable LLM-based rerankers / reformulators.
+# ── Search space ──────────────────────────────────────────────────────────────
+# MUST be identical to tune_trec_covid.yaml for a fair comparison.
 search_space_overrides:
   reranker_types:
     - noop
     - cross-encoder
+    - monot5
   reformulator_types:
     - identity
   estimator_types:
@@ -35,6 +36,7 @@ search_space_overrides:
     - utility
     - similarity
   scheduler_types:
+    - active-learning
     - graceful-degradation
   feedback_types:
     - none
