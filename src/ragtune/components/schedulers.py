@@ -10,9 +10,18 @@ class ActiveLearningScheduler(BaseScheduler):
         self, 
         batch_size: int = 5, 
         strategy: str = "cross_encoder",
+        estimator=None,
     ):
         self.batch_size = batch_size
         self.strategy = strategy
+        if estimator is not None:
+            import warnings
+            warnings.warn(
+                "Passing 'estimator' to ActiveLearningScheduler is deprecated and has no effect. "
+                "Pass 'estimator' to RAGtuneController instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     def select_batch(self, pool: CandidatePool, budget: RemainingBudgetView) -> Optional[BatchProposal]:
         eligible = pool.get_eligible()
