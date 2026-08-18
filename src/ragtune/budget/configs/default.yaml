@@ -1,0 +1,99 @@
+# =============================================================================
+# RAGtune Budget System — Default Configuration
+# =============================================================================
+#
+# All parameters are configurable. No hardcoded values in Python code.
+# Every value flows through BudgetConfig from YAML/env/CLI.
+#
+# Source citations for defaults:
+#   gpu_type: "A100-80GB" — most common cloud GPU (AWS/Azure/GCP)
+#   pue: 1.15 — hyperscale average (Uptime Institute 2024)
+#   carbon_intensity: 450 gCO2/kWh — Ember Global Electricity Review 2025
+#   electricity_cost: $0.12/kWh — US commercial average (EIA 2024)
+#   kv_overhead_per_token_s: 0.00014 — calibrated from arXiv 2606.11690
+#   cache_saving_fraction: 0.50 — vLLM APC documentation (prefill only)
+#   default_tokens_per_doc: 512 — conservative estimate for reranking
+#   escalation_gap_threshold: 0.05 — strategy escalation trigger
+#   gpu_power_idle_fraction: 0.25 — NVIDIA GPU idle power (25% of TDP)
+#   gpu_power_active_fraction: 0.75 — NVIDIA GPU active power swing
+#
+# GPU Specifications Source:
+#   NVIDIA Official Datasheets (nvidia.com/en-us/data-center/)
+#   - T4: nvidia.com/content/dam/en-zz/Solutions/Data-Center/tesla-t4/t4-tensor-core-datasheet-951643.pdf
+#   - L4: nvidia.com/content/dam/en-zz/Solutions/Data-Center/l4/PB-11316-001_v01.pdf
+#   - V100: images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf
+#   - A100: nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf
+#   - H100: nvidia.com/content/dam/en-zz/Solutions/Data-Center/h100/PB-11773-001_v01.pdf
+#
+# Cloud Pricing Source:
+#   AWS: aws.amazon.com/ec2/pricing/on-demand/
+#   GCP: cloud.google.com/products/compute/gpus-pricing
+#   Azure: azure.microsoft.com/en-us/pricing/details/virtual-machines/linux/
+#
+# Carbon Intensity Sources:
+#   Ember Global Electricity Review 2025: ember-energy.org/data/electricity-data-explorer/
+#   Our World in Data: ourworldindata.org/grapher/carbon-intensity-electricity
+#   EPA eGRID 2023: epa.gov/egrid
+#   Google Cloud Sustainability: cloud.google.com/sustainability/region-carbon
+#
+# =============================================================================
+
+# ── GPU Configuration ──────────────────────────────────────────────────────
+gpu_type: "A100-80GB"          # GPU hardware type
+gpu_count: 1                   # Number of GPUs
+gpu_hourly_rate: 0.0           # GPU hourly rate ($, 0 = use GPU_SPECS default)
+
+# ── Cloud/Region Configuration ─────────────────────────────────────────────
+region: "us-east"              # Cloud region for carbon intensity lookup
+electricity_cost_per_kwh: 0.12 # Electricity price ($/kWh) — US commercial avg (EIA 2024)
+carbon_intensity_g_per_kwh: 450 # Grid carbon intensity (gCO2/kWh) — Ember 2025
+pue: 1.15                      # Power Usage Effectiveness — Uptime Institute 2024
+
+# ── Model Configuration ────────────────────────────────────────────────────
+model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+model_architecture: "dense"
+active_params_b: 0.1           # Active parameters (billions)
+total_params_b: 0.1            # Total parameters (billions)
+quantization: "fp16"           # fp16, fp8, int8, int4
+
+# ── Throughput Configuration ────────────────────────────────────────────────
+max_batch_size: 256            # Maximum batch size
+latency_slo_ms: 500            # Latency SLO (milliseconds)
+offered_rps: 10.0              # Request rate (requests/sec)
+tensor_parallel: 1             # Tensor parallelism
+pipeline_parallel: 1           # Pipeline parallelism
+kv_overhead_per_token_s: 0.00014  # KV cache overhead (s/token) — arXiv 2606.11690
+lam_sat_fallback: 15.0         # Saturation knee fallback
+peak_utilization_threshold: 0.9 # Batch size classification threshold
+
+# ── Cache Configuration ─────────────────────────────────────────────────────
+cache_saving_fraction: 0.50    # Cache savings fraction — vLLM APC docs
+cache_hit_rate: 0.0            # Statistical cache hit rate (0.0-1.0)
+
+# ── Token Estimation ───────────────────────────────────────────────────────
+default_tokens_per_doc: 512    # Default tokens per document
+
+# ── Scheduler Configuration ────────────────────────────────────────────────
+escalation_gap_threshold: 0.05 # Strategy escalation trigger
+
+# ── GPU Power Model ────────────────────────────────────────────────────────
+gpu_power_idle_fraction: 0.25  # GPU idle power fraction — NVIDIA power model
+gpu_power_active_fraction: 0.75 # GPU active power swing — NVIDIA power model
+
+# ── Embedding Configuration ────────────────────────────────────────────────
+# embedding_model: "openai/text-embedding-3-small"  # Uncomment to set
+# embedding_price_per_million: 0.02                 # Uncomment to override
+
+# ── Reranking Configuration ────────────────────────────────────────────────
+# reranking_model: "cohere/rerank-v4-pro"           # Uncomment to set
+
+# ── CPU Configuration ──────────────────────────────────────────────────────
+# For CPU-only or mixed CPU/GPU workloads
+# Source: Intel/AMD product specifications
+cpu_type: ""                     # CPU model (e.g., "Intel Xeon Platinum 8375C")
+cpu_cores: 0                     # Physical cores (0 = not configured)
+cpu_threads: 0                   # Logical threads (0 = not configured)
+cpu_hourly_rate: 0.0             # CPU hourly rate ($/hr, 0 = not configured)
+cpu_tdp_w: 0                     # CPU TDP in watts (0 = not configured)
+num_processes: 1                 # Number of parallel processes
+num_threads_per_process: 1       # Threads per process

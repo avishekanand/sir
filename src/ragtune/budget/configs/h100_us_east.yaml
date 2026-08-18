@@ -1,0 +1,19 @@
+# H100 US East configuration
+# Optimized for NVIDIA H100 NVL on Azure US East
+
+gpu_type: "H100-NVL-96GB"
+gpu_count: 2
+gpu_hourly_rate: 6.98
+region: "us-east"
+electricity_cost_per_kwh: 0.12
+carbon_intensity_g_per_kwh: 350
+model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+model_architecture: "dense"
+active_params_b: 0.1
+total_params_b: 0.1
+quantization: "fp8"
+max_batch_size: 256
+latency_slo_ms: 300
+offered_rps: 25.0
+tensor_parallel: 1
+pipeline_parallel: 1

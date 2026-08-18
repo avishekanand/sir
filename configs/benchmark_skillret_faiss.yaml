@@ -1,0 +1,69 @@
+# =============================================================================
+# Benchmark Configuration — SKILLRET with Dense FAISS Retriever
+# =============================================================================
+# This is a CONFIG FILE — nothing hardcoded in the runner.
+# It demonstrates the "cassette" model: swap the retriever/indexer via config.
+#
+# Compare with the default (BM25) config — only the retriever/indexer keys
+# change. The scenarios are identical; the retriever is a pluggable cassette.
+#
+# This mirrors Rahul's PR #20 approach (FAISS dense retrieval) but expressed
+# as pure config for the generalized runner.
+# =============================================================================
+
+benchmark: "skillret"
+subset: ""                # empty = all subsets ("test" for skillret)
+queries: 20               # 0 = all queries (fast demo: 20)
+top_k: 50                 # candidates retrieved per query
+eval_ks: [10, 50]         # eval cutoffs — config, not hardcoded
+
+# ── Retriever cassette ──────────────────────────────────────────────────────
+# index_type selects the IndexFactory registry key. For dense (faiss/numpy/flex)
+# you MUST provide indexer_params (at minimum model_name_or_path for faiss/numpy).
+index_type: "faiss"
+indexer_params:
+  model_name_or_path: "sentence-transformers/all-MiniLM-L6-v2"
+  device: "cpu"
+  normalize: true
+
+# ── Scenarios (pipeline configs) ────────────────────────────────────────────
+# Same scenario structure as SCENARIOS env var — passed to ConfigLoader.
+scenarios:
+  - name: "dense_baseline"
+    pipeline:
+      components:
+        reranker: {type: "noop"}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 1}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 0
+          tokens: 100000
+          latency_ms: 60000
+
+  - name: "dense_rerank_tight"
+    pipeline:
+      components:
+        reranker: {type: "cross-encoder", params: {batch_size: 256}}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 2}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 5
+          tokens: 100000
+          latency_ms: 600000
+
+  - name: "dense_rerank_loose"
+    pipeline:
+      components:
+        reranker: {type: "cross-encoder", params: {batch_size: 256}}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 10}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 30
+          tokens: 100000
+          latency_ms: 600000

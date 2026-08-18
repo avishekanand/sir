@@ -1,9 +1,25 @@
 from typing import List, Optional, Dict, Any
-from ragtune.core.types import ControllerOutput, ControllerTrace, ScoredDocument, BatchProposal, RAGtuneContext, ItemState
+from ragtune.core.types import (
+    ControllerOutput,
+    ControllerTrace,
+    ScoredDocument,
+    BatchProposal,
+    RAGtuneContext,
+    ItemState,
+)
 from ragtune.core.budget import CostBudget, CostTracker
-from ragtune.core.interfaces import BaseRetriever, BaseReformulator, BaseReranker, BaseAssembler, BaseScheduler, BaseEstimator, BaseFeedback
+from ragtune.core.interfaces import (
+    BaseRetriever,
+    BaseReformulator,
+    BaseReranker,
+    BaseAssembler,
+    BaseScheduler,
+    BaseEstimator,
+    BaseFeedback,
+)
 from ragtune.core.pool import CandidatePool, PoolItem
 from ragtune.utils.config import config
+
 
 class RAGtuneController:
     def __init__(
@@ -17,7 +33,16 @@ class RAGtuneController:
         budget: Optional[CostBudget] = None,
         feedback: Optional[BaseFeedback] = None,
         initial_top_k: Optional[int] = None,
+        cost_loader: Optional[Any] = None,
+        cost_config: Optional[Dict[str, Any]] = None,
     ):
+        """
+        Args:
+            cost_loader: Optional BudgetLoader for cost estimation per iteration.
+                Must implement .calculate(context) -> BudgetResult.
+                When provided, estimates cost/energy/carbon after each rerank batch.
+            cost_config: Dict of config overrides passed to cost_loader.calculate().
+        """
         self.retriever = retriever
         self.reformulator = reformulator
         self.reranker = reranker
@@ -28,23 +53,38 @@ class RAGtuneController:
         self.feedback = feedback
         self.initial_top_k = initial_top_k
         self._reformulation_cache: Dict[str, List[str]] = {}
+        # Cost estimation (optional BudgetLoader integration)
+        self.cost_loader = cost_loader
+        self.cost_config = cost_config or {}
 
-    def run(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
+    def run(
+        self, query: str, override_budget: Optional[CostBudget] = None
+    ) -> ControllerOutput:
         budget = override_budget or self.budget
         trace = ControllerTrace()
         tracker = CostTracker(budget, trace)
         context = RAGtuneContext(query=query, tracker=tracker)
-        
+
+        # Cost tracking (optional)
+        total_cost_usd = 0.0
+        total_energy_kwh = 0.0
+        total_carbon_kg = 0.0
+        iteration_costs: List[Dict[str, Any]] = []
+
         # 1. Original Retrieval
-        d_orig = self.initial_top_k if self.initial_top_k is not None else config.get("retrieval.original_query_depth", 10)
+        d_orig = (
+            self.initial_top_k
+            if self.initial_top_k is not None
+            else config.get("retrieval.original_query_depth", 10)
+        )
         d_ref = config.get("retrieval.depth_per_reformulation", 5)
         max_pool = config.get("retrieval.max_pool_size", 50)
-        
+
         pool = CandidatePool()
         if tracker.try_consume_retrieval():
             docs_orig = self.retriever.retrieve(context, top_k=d_orig)
             pool.add_items(docs_orig, source="original")
-        
+
         # 2. Reformulation Decision (Gated by Estimator)
         queries = []
         if self.estimator.needs_reformulation(context, pool):
@@ -54,10 +94,10 @@ class RAGtuneController:
             else:
                 queries = self.reformulator.generate(context)
                 self._reformulation_cache[query] = queries
-                
+
         if not queries:
             queries = []
-        
+
         # 3. Supplemental Retrieval (with budget check per round)
         seen_queries = {query.lower().strip()}
         for q_idx, q in enumerate(queries):
@@ -65,21 +105,33 @@ class RAGtuneController:
             if q_norm in seen_queries:
                 continue
             seen_queries.add(q_norm)
-            
+
             if not tracker.try_consume_retrieval():
-                trace.add("controller", "retrieval_skipped", query=q, reason="budget_exhausted")
+                trace.add(
+                    "controller",
+                    "retrieval_skipped",
+                    query=q,
+                    reason="budget_exhausted",
+                )
                 continue
 
             q_context = context.model_copy(update={"query": q})
             docs_ref = self.retriever.retrieve(q_context, top_k=d_ref)
             pool.add_items(docs_ref, source=f"rewrite_{q_idx}")
-        
+
         # Enforce pool cap
         pool.enforce_cap(max_pool)
         metrics = pool.get_metrics()
-        trace.add("controller", "pool_init", count=len(pool), reformulations=queries, metrics=metrics)
+        trace.add(
+            "controller",
+            "pool_init",
+            count=len(pool),
+            reformulations=queries,
+            metrics=metrics,
+        )
 
         # 3. Iterative Loop
+        iteration = 0
         while not tracker.is_exhausted():
             # A. Valorization (Estimator determines priorities)
             est_outputs = self.estimator.value(pool, context)
@@ -93,45 +145,112 @@ class RAGtuneController:
 
             # B. Feedback/Stop Check (runs after estimator so feedback sees current-iteration data)
             if self.feedback:
-                should_stop, reason = self.feedback.should_stop(pool.get_metrics(), tracker.remaining_view(), estimates)
+                should_stop, reason = self.feedback.should_stop(
+                    pool.get_metrics(), tracker.remaining_view(), estimates
+                )
                 if should_stop:
                     trace.add("controller", "feedback_stop", reason=reason)
                     break
-            
+
             # C. Scheduling (Policy selects batch)
             proposal = self.scheduler.select_batch(pool, tracker.remaining_view())
             if not proposal:
                 break
-                
+
             # D. Transition to IN_FLIGHT
             pool.transition(proposal.doc_ids, ItemState.IN_FLIGHT)
-            
+
             # E. Execution (Reranker processes batch)
             try:
                 batch_items = pool.get_items(proposal.doc_ids)
-                results = self.reranker.rerank(batch_items, context, strategy=proposal.strategy)
+                results = self.reranker.rerank(
+                    batch_items, context, strategy=proposal.strategy
+                )
                 # F. Update scores and move to RERANKED
-                dropped = pool.update_scores(results, strategy=proposal.strategy, expected_ids=proposal.doc_ids)
+                dropped = pool.update_scores(
+                    results, strategy=proposal.strategy, expected_ids=proposal.doc_ids
+                )
                 tracker.consume(proposal.expected_cost)
 
                 trace.add(
-                    "controller", "rerank_batch",
+                    "controller",
+                    "rerank_batch",
                     count=len(proposal.doc_ids),
                     strategy=proposal.strategy,
                     doc_ids=proposal.doc_ids,
                     dropped_ids=dropped or None,
                 )
+
+                # G. Cost estimation (optional)
+                if self.cost_loader is not None:
+                    iteration += 1
+                    # Fetch batch items once (O(n)) instead of per-doc (O(n²))
+                    batch_items = pool.get_items(proposal.doc_ids)
+                    batch_tokens = (
+                        sum(
+                            item.metadata.get("token_count", 512)
+                            for item in batch_items
+                        )
+                        if batch_items
+                        else len(proposal.doc_ids) * 512
+                    )
+
+                    try:
+                        cost_result = self.cost_loader.calculate(
+                            {
+                                "prompt_tokens": batch_tokens,
+                                "completion_tokens": len(proposal.doc_ids)
+                                * 128,  # estimate
+                                "cached_tokens": 0,
+                                **self.cost_config,
+                            }
+                        )
+                        total_cost_usd += cost_result.cost_usd
+                        total_energy_kwh += cost_result.energy_kwh
+                        total_carbon_kg += cost_result.carbon_kg
+
+                        iter_cost = {
+                            "iteration": iteration,
+                            "cost_usd": cost_result.cost_usd,
+                            "energy_kwh": cost_result.energy_kwh,
+                            "carbon_kg": cost_result.carbon_kg,
+                            "batch_size": len(proposal.doc_ids),
+                            "strategy": proposal.strategy,
+                        }
+                        iteration_costs.append(iter_cost)
+
+                        trace.add(
+                            "controller",
+                            "cost_estimate",
+                            iteration=iteration,
+                            cost_usd=cost_result.cost_usd,
+                            energy_kwh=cost_result.energy_kwh,
+                            carbon_kg=cost_result.carbon_kg,
+                        )
+                    except Exception as e:
+                        trace.add("controller", "cost_estimate_error", error=str(e))
+
             except Exception as e:
-                trace.add("controller", "rerank_error", error=str(e), doc_ids=proposal.doc_ids)
+                trace.add(
+                    "controller", "rerank_error", error=str(e), doc_ids=proposal.doc_ids
+                )
                 pool.transition(proposal.doc_ids, ItemState.DROPPED)
-            
+
         # 4. Assembly
         active_items = pool.get_active_items()
         final_docs = self.assembler.assemble(active_items, context)
-        
+
+        # Build final budget state with cost tracking
+        final_state = tracker.snapshot()
+        if self.cost_loader is not None:
+            final_state["total_cost_usd"] = round(total_cost_usd, 6)
+            final_state["total_energy_kwh"] = round(total_energy_kwh, 8)
+            final_state["total_carbon_kg"] = round(total_carbon_kg, 8)
+            final_state["iteration_costs"] = iteration_costs
+
         return ControllerOutput(
             query=query,
             documents=final_docs,
             trace=trace,
-            final_budget_state=tracker.snapshot()
+            final_budget_state=final_state,
         )

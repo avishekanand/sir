@@ -13,4 +13,6 @@ ragtune_config.yaml
 proposals/
 .superpowers/
 indexes/sbs_agents.md
+indexes/
 sbs_agents.md
+pr_draft_budget.md

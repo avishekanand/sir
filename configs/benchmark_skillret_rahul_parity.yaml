@@ -1,0 +1,70 @@
+# =============================================================================
+# Benchmark Config — SKILLRET, RAHUL-PARITY (PR #20)
+# =============================================================================
+# This config reproduces rahulseetharaman's PR #20 setup EXACTLY:
+#   - Corpus: name + description only (corpus_fields=["name","description"],
+#             corpus_sep="\n\n" → "{name}\n\n{description}")
+#   - Retriever: FAISS dense, all-MiniLM-L6-v2
+#   - Queries: 20 (Rahul's default SKILLRET_QUERIES)
+#   - Top-K: 50 (Rahul's CANDIDATES_TOP_K)
+#   - Eval: NDCG@10, Recall@10, Recall@50
+#   - Baseline: No-Rerank (noop reranker) → should match Rahul's 0.5402 NDCG@10
+#
+# NOTE: Rahul's RAGtune scenarios use an ORACLE reranker (gold-aware, test-only).
+# Our config uses real rerankers, so reranking numbers will differ by design.
+# The No-Rerank baseline is the apples-to-apples comparison.
+# =============================================================================
+
+benchmark: "skillret"
+subset: ""
+queries: 20               # Rahul's SKILLRET_QUERIES default
+top_k: 50                 # Rahul's CANDIDATES_TOP_K
+eval_ks: [10, 50]         # NDCG@10, Recall@10, Recall@50
+
+# ── Corpus representation (Rahul parity) ───────────────────────────────────
+corpus_fields: ["name", "description"]
+corpus_sep: "\n\n"        # "{name}\n\n{description}" — exactly Rahul's format
+min_relevance: 1          # positive qrels only — exactly Rahul's filter
+
+# ── Retriever cassette (Rahul parity: FAISS + MiniLM, L2 metric) ───────────
+# Rahul uses langchain FAISS.from_documents → IndexFlatL2 (Euclidean).
+# Our FaissIndexer supports metric: "ip" (inner product/cosine) or "l2" (Euclidean).
+# metric: "l2" matches Rahul exactly.
+index_type: "faiss"
+indexer_params:
+  model_name_or_path: "sentence-transformers/all-MiniLM-L6-v2"
+  device: "cpu"
+  metric: "l2"             # IndexFlatL2, matches langchain FAISS (Rahul's setup)
+  normalize: false
+
+# ── Index storage ───────────────────────────────────────────────────────────
+index_dir: "indexes/benchmarks_rahul_parity"
+force_reindex: false
+
+# ── Scenarios ───────────────────────────────────────────────────────────────
+scenarios:
+  - name: "No-Rerank (FAISS)"   # ← matches Rahul's baseline (0.5402)
+    pipeline:
+      components:
+        reranker: {type: "noop"}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 1}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 0
+          tokens: 100000
+          latency_ms: 60000
+
+  - name: "Static Rerank (budget=20)"
+    pipeline:
+      components:
+        reranker: {type: "cross-encoder", params: {batch_size: 256}}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 20}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 20
+          tokens: 100000
+          latency_ms: 600000
