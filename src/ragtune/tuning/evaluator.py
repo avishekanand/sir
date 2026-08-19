@@ -66,8 +66,23 @@ class EvalDataset:
             pt.init()
 
         dataset = pt.get_dataset(irds_id)
-        topics_df = dataset.get_topics()    # columns: qid, query
+        topics_df = dataset.get_topics()    # columns vary by dataset
         qrels_df = dataset.get_qrels()      # columns: qid, docno, label
+
+        # Normalise to a 'query' column.  BEIR datasets expose different field
+        # names: trec-covid has ('text','query','narrative'), nfcorpus has
+        # ('text','url'), scifact/fiqa have just ('text',).  We prefer 'query'
+        # (the short title used in BEIR benchmarks) then fall back to 'text'.
+        if "query" not in topics_df.columns:
+            for candidate in ("text", "title", "question"):
+                if candidate in topics_df.columns:
+                    topics_df = topics_df.rename(columns={candidate: "query"})
+                    break
+            else:
+                raise ValueError(
+                    f"Cannot find a query column in topics for {irds_id}. "
+                    f"Available columns: {list(topics_df.columns)}"
+                )
 
         # Build qrels dict
         qrels_map: Dict[str, Dict[str, int]] = {}
