@@ -46,7 +46,11 @@ class PyTerrierRetriever(BaseRetriever):
                 if os.path.exists(props_path):
                     abs_path = props_path
 
-            controls = {"BM25.b": str(bm25_b), "BM25.k_1": str(bm25_k1)}
+            # Terrier's standard (non-field) BM25 uses "c" for the b parameter.
+            # "BM25.b" routes to the field-aware BM25F variant, which requires
+            # field statistics in the index and raises IllegalStateException on
+            # indexes built without fields enabled.
+            controls = {"c": str(bm25_b), "BM25.k_1": str(bm25_k1)}
             # Request text from the meta index so downstream rerankers get content.
             try:
                 self.pt_transformer = pt.terrier.Retriever(
