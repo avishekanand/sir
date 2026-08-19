@@ -46,21 +46,26 @@ class PyTerrierRetriever(BaseRetriever):
                 if os.path.exists(props_path):
                     abs_path = props_path
 
-            # Terrier's standard (non-field) BM25 uses "c" for the b parameter.
-            # "BM25.b" routes to the field-aware BM25F variant, which requires
-            # field statistics in the index and raises IllegalStateException on
-            # indexes built without fields enabled.
-            controls = {"c": str(bm25_b), "BM25.k_1": str(bm25_k1)}
+            # PyTerrier 1.1+ uses Terrier MatchOps by default.  The MatchOps
+            # pipeline (TerrierQLToMatchOpQL → SingleTermOp) calls
+            # checkForFields() unconditionally, raising IllegalStateException
+            # on any index built without field statistics.  Setting
+            # matchopql=off in controls tells TerrierQLToMatchOpQL to skip the
+            # conversion and fall back to classic daat.Full matching, which does
+            # not require fields.  BM25 parameters are set via ApplicationSetup
+            # properties (not controls) to avoid any further MatchOps triggers.
+            controls = {"matchopql": "off"}
+            properties = {"c": str(bm25_b), "k1": str(bm25_k1)}
             # Request text from the meta index so downstream rerankers get content.
             try:
                 self.pt_transformer = pt.terrier.Retriever(
                     abs_path, wmodel="BM25", controls=controls,
-                    metadata=["docno", "text"],
+                    properties=properties, metadata=["docno", "text"],
                 )
             except Exception:
                 self.pt_transformer = pt.BatchRetrieve(
                     abs_path, wmodel="BM25", controls=controls,
-                    metadata=["docno", "text"],
+                    properties=properties, metadata=["docno", "text"],
                 )
         else:
             raise ValueError("Either pt_transformer or index_path must be provided.")

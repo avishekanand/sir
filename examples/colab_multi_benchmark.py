@@ -148,13 +148,17 @@ for ds_name, ds_cfg in DATASETS.items():
     print(f" Dataset: {ds_name}")
     print(f"{'='*65}")
 
-    # ── Build retriever with BEIR-tuned BM25 parameters ───────────────────────
-    # Pass pt_transformer directly so BM25 controls are explicit.
-    br = pt.BatchRetrieve(
+    # ── Build retriever — disable MatchOps to avoid checkForFields() crash ───
+    # PyTerrier 1.1+ defaults to the Terrier MatchOps pipeline which calls
+    # checkForFields() unconditionally.  matchopql=off reverts to classic
+    # daat.Full matching.  BM25 params go via properties (ApplicationSetup).
+    br = pt.terrier.Retriever(
         ds_cfg["index_path"],
         wmodel="BM25",
-        controls={"BM25.b": str(BM25_B), "BM25.k_1": str(BM25_K1)},
+        controls={"matchopql": "off"},
+        properties={"c": str(BM25_B), "k1": str(BM25_K1)},
         metadata=["docno", "text"],
+        num_results=1000,
     )
     fixed_retriever = PyTerrierRetriever(pt_transformer=br)
 
