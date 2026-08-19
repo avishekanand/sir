@@ -61,24 +61,41 @@ DATASETS = {
     },
 }
 
-# ── Cell 5: Build indexes (skip if already built) ─────────────────────────────
+# ── Cell 5: Build indexes (skip if already built with field stats) ────────────
 from pathlib import Path
 
 def build_index(irds_id: str, index_path: str) -> None:
+    # Terrier MatchOps (default in PyTerrier 1.1+) calls checkForFields() even
+    # for standard BM25 — every index needs >= 1 field stored.  Detect and
+    # rebuild any old index that lacks field statistics.
     if Path(index_path + "/data.properties").exists():
-        print(f"  [{index_path}] already built — skipping")
-        return
-    print(f"  [{index_path}] building …")
+        idx = pt.IndexFactory.of(index_path)
+        n_fields = idx.getCollectionStatistics().getNumberOfFields()
+        if n_fields > 0:
+            n = idx.getCollectionStatistics().getNumberOfDocuments()
+            print(f"  [{index_path}] already built ({n:,} docs, {n_fields} field) — skipping")
+            return
+        print(f"  [{index_path}] exists but has no field stats — rebuilding …")
+
+    print(f"  [{index_path}] indexing {irds_id} …")
     ds = pt.get_dataset(irds_id)
+
+    def _add_body(it):
+        for doc in it:
+            doc["body"] = doc.get("text", "")
+            yield doc
+
     indexer = pt.IterDictIndexer(
         index_path,
         overwrite=True,
         meta={"docno": 26, "text": 131072},
-        text_attrs=["text"],
+        fields=["body"],   # creates field statistics — required by Terrier MatchOps
     )
-    indexer.index(ds.get_corpus_iter())
-    n = pt.IndexFactory.of(index_path).getCollectionStatistics().getNumberOfDocuments()
-    print(f"  [{index_path}] done — {n:,} documents")
+    indexer.index(_add_body(ds.get_corpus_iter()))
+    idx = pt.IndexFactory.of(index_path)
+    stats = idx.getCollectionStatistics()
+    print(f"  [{index_path}] done — {stats.getNumberOfDocuments():,} docs, "
+          f"{stats.getNumberOfFields()} field(s)")
 
 print("Building indexes …")
 for name, cfg in DATASETS.items():
