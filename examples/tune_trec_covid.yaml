@@ -8,7 +8,7 @@ dataset:
 n_trials: 300
 n_startup_trials: 60       # random exploration before TPE engages
 n_parallel_workers: 1      # sequential (global config singleton is not thread-safe)
-n_eval_queries: 50         # sample of queries per trial; raise to 200+ for publication
+n_eval_queries: 50         # full TREC-COVID query set for reliable NDCG estimates
 
 seed: 42
 
@@ -16,8 +16,8 @@ seed: 42
 storage_url: "sqlite:///tuning_results/trec-covid-bayes-v1.db"
 
 # Pruner thresholds
-max_mean_rerank_docs: 40.0   # abort trial if mean rerank cost per query exceeds this
-max_trial_seconds: 90.0      # abort trial if projected wall time exceeds this
+max_mean_rerank_docs: 200.0  # matches widened budget_rerank_docs_range
+max_trial_seconds: 180.0     # generous ceiling per trial
 pareto_warmup_trials: 40     # ParetoPruner inactive until this many trials complete
 
 output_dir: tuning_results/trec-covid-bayes-v1

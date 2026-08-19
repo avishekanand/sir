@@ -17,18 +17,28 @@ class PyTerrierRetriever(BaseRetriever):
     """
     Adapter for PyTerrier transformers (indices) to work as RAGtune retrievers.
     """
-    def __init__(self, pt_transformer: Any = None, index_path: Optional[str] = None):
+    def __init__(
+        self,
+        pt_transformer: Any = None,
+        index_path: Optional[str] = None,
+        bm25_b: float = 0.4,
+        bm25_k1: float = 0.9,
+    ):
         """
         Args:
             pt_transformer: A PyTerrier transformer (e.g., pt.BatchRetrieve)
             index_path: Path to a PyTerrier index (used if pt_transformer is None)
+            bm25_b: BM25 b parameter (document length normalisation). Default 0.4
+                matches BEIR benchmark tuning (Anserini defaults).
+            bm25_k1: BM25 k1 parameter (term frequency saturation). Default 0.9
+                matches BEIR benchmark tuning (Anserini defaults).
         """
         if pt_transformer is not None:
             self.pt_transformer = pt_transformer
         elif index_path is not None:
             if pt is None:
                 raise ImportError("PyTerrier not installed but index_path provided.")
-            
+
             abs_path = os.path.abspath(index_path)
             # If it's a directory, look for data.properties
             if os.path.isdir(abs_path):
@@ -36,14 +46,17 @@ class PyTerrierRetriever(BaseRetriever):
                 if os.path.exists(props_path):
                     abs_path = props_path
 
+            controls = {"BM25.b": str(bm25_b), "BM25.k_1": str(bm25_k1)}
             # Request text from the meta index so downstream rerankers get content.
             try:
                 self.pt_transformer = pt.terrier.Retriever(
-                    abs_path, wmodel="BM25", metadata=["docno", "text"]
+                    abs_path, wmodel="BM25", controls=controls,
+                    metadata=["docno", "text"],
                 )
             except Exception:
                 self.pt_transformer = pt.BatchRetrieve(
-                    abs_path, wmodel="BM25", metadata=["docno", "text"]
+                    abs_path, wmodel="BM25", controls=controls,
+                    metadata=["docno", "text"],
                 )
         else:
             raise ValueError("Either pt_transformer or index_path must be provided.")

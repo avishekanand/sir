@@ -53,13 +53,13 @@ class RAGtuneSearchSpace(BaseModel):
     similarity_models: List[str] = Field(default_factory=lambda: list(SIMILARITY_MODELS))
 
     # ── Numerical ranges (low, high) ──────────────────────────────────────────
-    original_query_depth_range: Tuple[int, int] = (5, 50)
+    original_query_depth_range: Tuple[int, int] = (10, 200)
     depth_per_reformulation_range: Tuple[int, int] = (1, 20)
     max_pool_size_range: Tuple[int, int] = (10, 200)
     near_duplicate_threshold_range: Tuple[float, float] = (0.5, 0.95)
     scheduler_batch_size_range: Tuple[int, int] = (1, 20)
     assembler_max_docs_range: Tuple[int, int] = (3, 20)
-    budget_rerank_docs_range: Tuple[int, int] = (5, 150)
+    budget_rerank_docs_range: Tuple[int, int] = (5, 200)
     budget_reformulations_range: Tuple[int, int] = (0, 5)
     gd_llm_limit_range: Tuple[int, int] = (1, 10)
     gd_ce_limit_range: Tuple[int, int] = (1, 30)
