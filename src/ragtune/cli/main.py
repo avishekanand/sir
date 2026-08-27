@@ -50,8 +50,8 @@ def init(
                     "metadata_fields": ["source"]
                 },
                 "index": {
-                    "framework": "pyterrier",
-                    "params": {"index_path": "./index"}
+                    "type": "sparse",
+                    "index_path": "./index"
                 },
                 "components": {
                     "retriever": {
@@ -323,25 +323,23 @@ def index(
             console.print("[bold red]Error:[/bold red] Config must have 'pipeline.data' and 'pipeline.index' sections to run indexing.")
             raise typer.Exit(code=1)
 
-        # Force load indexers
+        # Register all built-in indexers, then resolve via IndexConfig rules
+        # (type: "sparse" -> pyterrier; type: "dense" -> backend + model).
         try:
-            import ragtune.indexing.pyterrier_indexer # noqa
+            import ragtune.indexing  # noqa: F401
         except ImportError:
             pass
 
-        framework = pipeline.index.framework
-        indexer_cls = registry.get_indexer(framework)
-        
-        if not indexer_cls:
-            console.print(f"[bold red]Error:[/bold red] Indexer framework '{framework}' not found in registry.")
-            raise typer.Exit(code=1)
+        from ragtune.indexing.factory import IndexFactory
 
-        indexer = indexer_cls()
-        
+        indexer = IndexFactory.from_config(pipeline.index)
+
+        idx_cfg = pipeline.index
+        resolved = idx_cfg.type + (f"/{idx_cfg.backend}" if idx_cfg.backend else "")
         console.print(f"[bold blue]Building index for {pipeline.name}...[/bold blue]")
-        console.print(f" Framework: {framework}")
+        console.print(f" Indexer: {resolved}")
         console.print(f" Source: {pipeline.data.collection_path}")
-        console.print(f" Target: {pipeline.index.params.get('index_path')}")
+        console.print(f" Target: {idx_cfg.index_path}")
 
         with console.status("[bold green]Indexing...[/bold green]"):
             fields = {
@@ -353,7 +351,7 @@ def index(
                 collection_path=pipeline.data.collection_path,
                 format=pipeline.data.collection_format,
                 fields=fields,
-                **pipeline.index.params
+                index_path=idx_cfg.index_path
             )
         
         if success:

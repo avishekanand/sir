@@ -111,8 +111,8 @@ pipeline:
     collection_path: "./data/docs.jsonl"
     collection_format: "jsonl"
   index:
-    framework: "pyterrier"
-    params: { index_path: "./index" }
+    type: "sparse"            # "sparse" -> PyTerrier BM25; "dense" needs backend + model
+    index_path: "./index"
   components:
     retriever: { type: "pyterrier" }
     reranker: { type: "ollama-listwise", params: { model_name: "deepseek-r1:8b" } }
