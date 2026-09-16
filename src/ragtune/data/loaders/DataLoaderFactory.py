@@ -1,6 +1,6 @@
 """
 DataLoader Factory
-==================
+=================
 Maps (benchmark, dataset) pairs to the appropriate loader class.
 
 This is the single registration point – adding a new benchmark means
@@ -15,6 +15,8 @@ from ragtune.data.constants import (
     Dataset,
     BRIGHT_TASKS,
     FRESHSTACK_TOPICS,
+    TOOLRET_SUBSETS,
+    SRA_BENCH_SUBSETS,
     COIR_DATASETS,
     Split,
 )
@@ -66,6 +68,7 @@ class DataLoaderFactory:
         # ---- BRIGHT ----
         if benchmark_name == Benchmark.BRIGHT or dataset_name in BRIGHT_TASKS:
             from ragtune.data.loaders.BRIGHTLoader import BRIGHTLoader
+
             task = dataset_name
             logger.info(f"[Factory] Creating BRIGHTLoader(task={task!r})")
             return BRIGHTLoader(
@@ -77,8 +80,12 @@ class DataLoaderFactory:
             )
 
         # ---- FreshStack ----
-        if benchmark_name == Benchmark.FRESHSTACK.upper() or dataset_name in FRESHSTACK_TOPICS:
+        if (
+            benchmark_name == Benchmark.FRESHSTACK.upper()
+            or dataset_name in FRESHSTACK_TOPICS
+        ):
             from ragtune.data.loaders.FreshStackLoader import FreshStackLoader
+
             logger.info(f"[Factory] Creating FreshStackLoader(topic={dataset_name!r})")
             return FreshStackLoader(
                 topic=dataset_name,
@@ -86,22 +93,12 @@ class DataLoaderFactory:
                 cache_dir=cache_dir,
             )
 
-        # ---- CoIR ----
-        if benchmark_name == Benchmark.COIR.upper() or dataset_name in COIR_DATASETS:
-            from ragtune.data.loaders.CoIRLoader import CoIRLoader
-            logger.info(f"[Factory] Creating CoIRLoader(dataset={dataset_name!r})")
-            return CoIRLoader(
-                dataset=dataset_name,
-                split=split,
-                cache_dir=cache_dir,
-                **kwargs,
-            )
-
         # ---- BEIR via HuggingFace (mteb mirror) ----
         if benchmark_name == Benchmark.BEIR.upper():
             hf_name = kwargs.pop("hf_dataset_name", f"mteb/{dataset_name}")
             subset = kwargs.pop("subset", None)
             from ragtune.data.loaders.HuggingFaceLoader import HuggingFaceLoader
+
             logger.info(
                 f"[Factory] Creating HuggingFaceLoader for BEIR "
                 f"hf={hf_name!r} subset={subset!r}"
@@ -109,6 +106,63 @@ class DataLoaderFactory:
             return HuggingFaceLoader(
                 hf_dataset_name=hf_name,
                 subset=subset,
+                split=split,
+                cache_dir=cache_dir,
+                **kwargs,
+            )
+
+        # ---- ToolRet ----
+        if (
+            benchmark_name == Benchmark.TOOLRET.upper()
+            or dataset_name in TOOLRET_SUBSETS
+        ):
+            from ragtune.data.loaders.ToolRetLoader import ToolRetLoader
+
+            n_queries = kwargs.pop("n_queries", 0)
+            logger.info(f"[Factory] Creating ToolRetLoader(dataset={dataset_name!r})")
+            return ToolRetLoader(
+                dataset=dataset_name,
+                split=split,
+                n_queries=n_queries,
+                cache_dir=cache_dir,
+            )
+
+        # ---- SkillRet ----
+        if benchmark_name == Benchmark.SKILLRET.upper():
+            from ragtune.data.loaders.SkillRetLoader import SkillRetLoader
+
+            n_queries = kwargs.pop("n_queries", 0)
+            logger.info(f"[Factory] Creating SkillRetLoader(split={dataset_name!r})")
+            return SkillRetLoader(
+                dataset=dataset_name,
+                split=split,
+                n_queries=n_queries,
+                cache_dir=cache_dir,
+            )
+
+        # ---- SRA-Bench ----
+        if (
+            benchmark_name == Benchmark.SRA_BENCH.upper()
+            or dataset_name in SRA_BENCH_SUBSETS
+        ):
+            from ragtune.data.loaders.SRABenchLoader import SRABenchLoader
+
+            n_queries = kwargs.pop("n_queries", 0)
+            logger.info(f"[Factory] Creating SRABenchLoader(dataset={dataset_name!r})")
+            return SRABenchLoader(
+                dataset=dataset_name,
+                split=split,
+                n_queries=n_queries,
+                cache_dir=cache_dir,
+            )
+
+        # ---- CoIR ----
+        if benchmark_name == Benchmark.COIR.upper() or dataset_name in COIR_DATASETS:
+            from ragtune.data.loaders.CoIRLoader import CoIRLoader
+
+            logger.info(f"[Factory] Creating CoIRLoader(dataset={dataset_name!r})")
+            return CoIRLoader(
+                dataset=dataset_name,
                 split=split,
                 cache_dir=cache_dir,
                 **kwargs,
@@ -122,6 +176,7 @@ class DataLoaderFactory:
             "Attempting IRDatasetsLoader as fallback."
         )
         from ragtune.data.loaders.IRDatasetsLoader import IRDatasetsLoader
+
         return IRDatasetsLoader(
             dataset_id=dataset_name,
             split=split,

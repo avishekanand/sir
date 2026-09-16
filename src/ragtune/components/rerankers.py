@@ -5,72 +5,110 @@ from ragtune.core.interfaces import BaseReranker
 from ragtune.registry import registry
 from ragtune.utils.config import config
 
+
 @registry.reranker("noop")
 class NoOpReranker(BaseReranker):
     """Identity reranker that returns documents as is."""
-    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+
+    def rerank(
+        self,
+        documents: List[PoolItem],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, float]:
         return {doc.doc_id: doc.final_score() for doc in documents}
+
 
 @registry.reranker("cross-encoder")
 class CrossEncoderReranker(BaseReranker):
     """Local reranking using SentenceTransformers CrossEncoder models."""
-    def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
-        from sentence_transformers import CrossEncoder
-        self.model = CrossEncoder(model_name)
 
-    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+    def __init__(
+        self,
+        model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        batch_size: int = 256,
+    ):
+        from sentence_transformers import CrossEncoder
+
+        self.model = CrossEncoder(model_name)
+        self.batch_size = batch_size
+
+    def rerank(
+        self,
+        documents: List[PoolItem],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, float]:
         if not documents:
             return {}
-            
+
         pairs = [[context.query, doc.content] for doc in documents]
-        scores = self.model.predict(pairs)
-        
+        scores = self.model.predict(pairs, batch_size=self.batch_size)
+
         return {doc.doc_id: float(score) for doc, score in zip(documents, scores)}
+
 
 @registry.reranker("llm")
 class LLMReranker(BaseReranker):
     """API-based reranking using LiteLLM for broad model support."""
+
     def __init__(self, model_name: str = "gpt-4o-mini"):
         import litellm
+
         self.model = model_name
 
-    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+    def rerank(
+        self,
+        documents: List[PoolItem],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, float]:
         if not documents:
             return {}
-            
+
         import litellm
-        
+
         prompts = config.get("prompts.reranking.pointwise")
         system_prompt = prompts.get("system")
         user_prompt_template = prompts.get("user")
-        
+
         scores = {}
         for doc in documents:
-            user_prompt = user_prompt_template.format(query=context.query, document=doc.content)
-            
+            user_prompt = user_prompt_template.format(
+                query=context.query, document=doc.content
+            )
+
             response = litellm.completion(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
-            
+
             try:
                 import json
+
                 result = json.loads(response.choices[0].message.content)
                 score = float(result.get("relevance_score", 0.0))
                 scores[doc.doc_id] = score
             except (ValueError, KeyError, AttributeError):
                 scores[doc.doc_id] = 0.0
-                
+
         return scores
+
 
 @registry.reranker("simulated")
 class SimulatedReranker(BaseReranker):
     """Placeholder for testing."""
-    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+
+    def rerank(
+        self,
+        documents: List[PoolItem],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, float]:
         scores = {}
         for doc in documents:
             is_match = context.query.lower() in doc.content.lower()
@@ -78,50 +116,68 @@ class SimulatedReranker(BaseReranker):
             scores[doc.doc_id] = reranker_score
         return scores
 
+
 @registry.reranker("ollama-listwise")
 class OllamaListwiseReranker(BaseReranker):
     """Listwise reranking using Ollama for local LLM inference."""
-    def __init__(self, model_name: str = "deepseek-r1:8b", base_url: str = "http://localhost:11434"):
+
+    def __init__(
+        self,
+        model_name: str = "deepseek-r1:8b",
+        base_url: str = "http://localhost:11434",
+    ):
         self.model_name = f"ollama/{model_name}"
         self.api_base = base_url
 
-    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+    def rerank(
+        self,
+        documents: List[PoolItem],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, float]:
         if not documents:
             return {}
-            
+
         try:
             import litellm
             import json
-            
+
             prompts = config.get_prompt("reranking.listwise_ranking")
             if not prompts:
                 # Fallback to hardcoded defaults or raise error
-                sys_prompt = "You are a helpful assistant that ranks documents by relevance."
+                sys_prompt = (
+                    "You are a helpful assistant that ranks documents by relevance."
+                )
                 user_template = "Rank these documents for query '{query}':\n{documents}"
             else:
-                sys_prompt = prompts.get("system", "You are a helpful assistant that ranks documents by relevance.")
+                sys_prompt = prompts.get(
+                    "system",
+                    "You are a helpful assistant that ranks documents by relevance.",
+                )
                 user_template = prompts.get("user", "")
 
             doc_list = ""
             for doc in documents:
-                doc_list += f"Document ID: {doc.doc_id}\nContent: {doc.content[:500]}\n---\n"
-                
+                doc_list += (
+                    f"Document ID: {doc.doc_id}\nContent: {doc.content[:500]}\n---\n"
+                )
+
             user_prompt = user_template.format(query=context.query, documents=doc_list)
-            
+
             response = litellm.completion(
                 model=self.model_name,
                 api_base=self.api_base,
                 messages=[
                     {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
-            
+
             content = response.choices[0].message.content
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
-            
+
             data = json.loads(content)
             if not data:
                 rankings = []
@@ -129,22 +185,27 @@ class OllamaListwiseReranker(BaseReranker):
                 rankings = data
             else:
                 rankings = data.get("rankings") or data.get("scores") or []
-            
+
             score_map = {}
             for item in rankings:
                 if isinstance(item, dict):
                     doc_id = str(item.get("doc_id") or item.get("id", ""))
                     if doc_id:
-                        score_map[doc_id] = float(item.get("relevance_score") or item.get("score", 0.0))
+                        score_map[doc_id] = float(
+                            item.get("relevance_score") or item.get("score", 0.0)
+                        )
                 elif isinstance(item, str):
                     # Fallback for list of IDs
-                    score_map[item] = 1.0 # Or some default rank-based score
-            
+                    score_map[item] = 1.0  # Or some default rank-based score
+
             return {doc.doc_id: score_map.get(doc.doc_id, 0.0) for doc in documents}
-            
+
         except Exception as e:
-            context.tracker.trace.add("reranker", "ollama_error", error=str(e), model=self.model_name)
+            context.tracker.trace.add(
+                "reranker", "ollama_error", error=str(e), model=self.model_name
+            )
             return {doc.doc_id: 0.0 for doc in documents}
+
 
 @registry.reranker("monot5")
 class MonoT5Reranker(BaseReranker):
@@ -154,25 +215,38 @@ class MonoT5Reranker(BaseReranker):
     Converts PoolItems to a PyTerrier DataFrame, calls MonoT5ReRanker.transform(),
     and returns {doc_id: score}.
     """
-    def __init__(self, model_name: str = "castorini/monot5-base-msmarco", batch_size: int = 16):
+
+    def __init__(
+        self, model_name: str = "castorini/monot5-base-msmarco", batch_size: int = 16
+    ):
         import pyterrier as pt
+
         if not pt.started():
             pt.init()
         from pyterrier_t5 import MonoT5ReRanker
+
         self._reranker = MonoT5ReRanker(model=model_name, batch_size=batch_size)
 
-    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
+    def rerank(
+        self,
+        documents: List[PoolItem],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, float]:
         import pandas as pd
+
         if not documents:
             return {}
-        df = pd.DataFrame({
-            "qid":   "q0",
-            "query": context.query,
-            "docno": [d.doc_id      for d in documents],
-            "text":  [d.content     for d in documents],
-            "score": [d.final_score() for d in documents],
-            "rank":  range(len(documents)),
-        })
+        df = pd.DataFrame(
+            {
+                "qid": "q0",
+                "query": context.query,
+                "docno": [d.doc_id for d in documents],
+                "text": [d.content for d in documents],
+                "score": [d.final_score() for d in documents],
+                "rank": range(len(documents)),
+            }
+        )
         result = self._reranker.transform(df)
         return dict(zip(result["docno"], result["score"]))
 
@@ -180,12 +254,26 @@ class MonoT5Reranker(BaseReranker):
 @registry.reranker("multi-strategy")
 class MultiStrategyReranker(BaseReranker):
     """Router for multiple reranking strategies."""
-    def __init__(self, strategies: Dict[str, BaseReranker], default_strategy: Optional[str] = None):
+
+    def __init__(
+        self,
+        strategies: Dict[str, BaseReranker],
+        default_strategy: Optional[str] = None,
+    ):
         self.strategies = strategies
         self.default_strategy = default_strategy or "identity"
 
-    def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
-        effective_strategy = strategy if strategy and strategy in self.strategies else self.default_strategy
+    def rerank(
+        self,
+        documents: List[PoolItem],
+        context: RAGtuneContext,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, float]:
+        effective_strategy = (
+            strategy
+            if strategy and strategy in self.strategies
+            else self.default_strategy
+        )
         if effective_strategy not in self.strategies:
             return {doc.doc_id: 0.0 for doc in documents}
         return self.strategies[effective_strategy].rerank(documents, context)

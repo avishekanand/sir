@@ -6,11 +6,15 @@ Covers the CoIR additions: dataset names live on `Dataset`, are collected in
 non-standard config/split naming.
 """
 
+import pytest
+
 from ragtune.data import constants
 from ragtune.data.constants import (
     BRIGHT_TASKS,
     COIR_DATASETS,
     FRESHSTACK_TOPICS,
+    SRA_BENCH_SUBSETS,
+    TOOLRET_SUBSETS,
     Benchmark,
     Dataset,
     HFDatasets,
@@ -57,10 +61,21 @@ def test_coir_hf_layout_constants():
     assert HFDatasets.COIR_QUERIES_CONFIG == HFDatasets.COIR_QUERIES_SPLIT == "queries"
 
 
-def test_dataset_name_lists_are_disjoint():
-    """A dataset name must dispatch to exactly one loader in the factory."""
-    assert not set(COIR_DATASETS) & set(BRIGHT_TASKS)
-    assert not set(COIR_DATASETS) & set(FRESHSTACK_TOPICS)
+@pytest.mark.parametrize(
+    "other_name, other",
+    [
+        ("BRIGHT_TASKS", BRIGHT_TASKS),
+        ("FRESHSTACK_TOPICS", FRESHSTACK_TOPICS),
+        ("TOOLRET_SUBSETS", TOOLRET_SUBSETS),
+        ("SRA_BENCH_SUBSETS", SRA_BENCH_SUBSETS),
+    ],
+)
+def test_coir_dataset_names_are_disjoint_from_other_benchmarks(other_name, other):
+    """
+    DataLoaderFactory dispatches on bare dataset names, so an overlap would
+    silently route a CoIR dataset to whichever branch is checked first.
+    """
+    assert not set(COIR_DATASETS) & set(other), other_name
 
 
 def test_no_duplicate_coir_datasets():
