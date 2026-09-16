@@ -13,3 +13,18 @@ ragtune_config.yaml
 proposals/
 .superpowers/
 indexes/
+
+# Credentials — src/ragtune/.env was untracked but unignored, so any `git add -A`
+# would have committed it.
+.env
+*.env
+!.env.example
+
+# Jupyter scratch dirs, created whenever a notebook or file is opened in Jupyter
+.ipynb_checkpoints/
+
+# Benchmark and optimizer outputs (examples/beir_full_benchmark.py,
+# bayesian_optimizer.py, prompt_optimizer.py)
+benchmark_results/
+bayes_opt_results/
+prompt_opt_results/
