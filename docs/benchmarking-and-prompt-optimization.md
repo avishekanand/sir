@@ -23,22 +23,31 @@ so their NDCG@10 numbers are directly comparable to each other and to
 ## 1. Installation
 
 ```bash
+# 1. environment (repo needs Python >= 3.9)
 conda create -y -n ragtune python=3.11
 conda activate ragtune
 
-pip install -e ".[tuning]"                        # ragtune + optuna + ir-datasets
-pip install python-terrier matplotlib             # not in pyproject
-pip install pyterrier-t5                          # only for --rerankers monot5
-pip install pyterrier-dr                          # only for --retrievers dense-* / hybrid-rrf
+# 2. RAGtune + benchmark dependencies
+cd /path/to/sir
+pip install -e ".[tuning]"
+pip install python-terrier matplotlib
 
-conda install -y -c conda-forge openjdk=21        # see the JDK note below
-export OPENAI_API_KEY=...                         # only for LLM components
+# 3. optional, per feature
+pip install pyterrier-t5      # --rerankers monot5
+pip install pyterrier-dr      # --retrievers dense-* / hybrid-rrf
+export OPENAI_API_KEY=...     # --optimizers llm, --rerankers llm, prompt_optimizer.py
+
+# 4. Java — a JDK, not a JRE (pyjnius needs javac)
+conda install -y -c conda-forge openjdk=21
+
+# 5. verify
+python -c "import pyterrier as pt, ragtune; print(pt.__version__, pt.__file__)"
+python examples/beir_full_benchmark.py --preset smoke --plan
 ```
 
-Verify before running anything long:
+Before a long sweep, also confirm the dataset IDs resolve:
 
 ```bash
-python -c "import pyterrier as pt, ragtune; print(pt.__version__, pt.__file__)"
 python examples/beir_full_benchmark.py --validate-datasets --datasets standard
 ```
 
