@@ -6,7 +6,12 @@ Reference for the two scripts added in `bench/beir-exhaustive-sweep` and
 | Script | What it searches | Artifact produced |
 |---|---|---|
 | `examples/beir_full_benchmark.py` | pipeline **configurations**, across a (dataset × retriever × seed) grid | Pareto pipeline YAMLs, CSVs, plots |
+| `examples/bayesian_optimizer.py` | pipeline **configurations**, one dataset, Optuna TPE | `best_config.yaml`, Pareto YAMLs |
 | `examples/prompt_optimizer.py` | **prompt text** for the LLM-backed components | `prompts.yaml` fragments |
+
+The last two are built to a single protocol — same baseline, same metric, same
+`summary.json` schema — so running both answers whether configuration or prompt
+tuning buys more quality for the same budget. See §3.2.
 
 Both reuse RAGtune's existing evaluation machinery (`ragtune.tuning.evaluator`),
 so their NDCG@10 numbers are directly comparable to each other and to
@@ -82,10 +87,37 @@ python examples/beir_full_benchmark.py --preset gpu-full --device cuda --resume
 # 4. rebuild tables/plots from state.json alone — no JVM, no re-evaluation
 python examples/beir_full_benchmark.py --preset gpu-full --report-only
 
-# 5. prompt optimization (needs OPENAI_API_KEY)
+# 5. Bayesian (Optuna TPE) optimization on one dataset
+python examples/bayesian_optimizer.py --dataset nfcorpus --dry-run
+python examples/bayesian_optimizer.py --dataset nfcorpus \
+    --iterations 50 --n-queries 50 --seeds 42,43,44
+
+# 5b. random-search control — same space and budget, no surrogate model
+python examples/bayesian_optimizer.py --dataset nfcorpus --sampler random \
+    --iterations 50 --n-queries 50 --seeds 42,43,44
+
+# 6. prompt optimization (needs OPENAI_API_KEY)
 python examples/prompt_optimizer.py --dataset nfcorpus --target reranker --dry-run
 python examples/prompt_optimizer.py --dataset nfcorpus --target reranker \
-    --iterations 20 --n-queries 20 --rerank-depth 10
+    --iterations 20 --n-queries 20 --rerank-depth 10 --seeds 42,43,44
+
+# 7. apples-to-apples: config tuning vs prompt tuning, identical protocol
+python examples/bayesian_optimizer.py --dataset nfcorpus --rerankers llm \
+    --iterations 20 --n-queries 20 --rerank-depth 10 --seeds 42,43,44 \
+    --out-dir ./cmp_bayes
+python examples/prompt_optimizer.py  --dataset nfcorpus --target reranker \
+    --iterations 20 --n-queries 20 --rerank-depth 10 --seeds 42,43,44 \
+    --out-dir ./cmp_prompt
+
+# 8. read both summaries side by side
+python - <<'EOF'
+import json
+for d in ("cmp_bayes", "cmp_prompt"):
+    s = json.load(open(f"{d}/summary.json"))
+    print(f"{s['run_type']:<26} baseline={s['baseline_ndcg_mean']:.4f} "
+          f"best={s['best_ndcg_mean']:.4f} gain={s['gain_mean']:+.4f} "
+          f"+/-{s['gain_stdev']:.4f}")
+EOF
 ```
 
 **Sharding notes.** Give every shard its own `--out-dir`: each writes a
@@ -333,9 +365,152 @@ range is derived from it.
 
 ---
 
-## 3. Prompt optimizer
+## 3. Bayesian optimizer
 
-### 3.1 What it is — and is not
+### 3.1 What it is
+
+`examples/bayesian_optimizer.py` searches the **pipeline configuration** with
+Optuna's multi-objective TPE sampler — the same method the notebook
+`examples/ragtune_benchmark.ipynb` runs as its "Bayesian TPE" arm, extracted into
+a standalone script.
+
+It is deliberately the mirror image of `prompt_optimizer.py`. The two are built
+to one protocol so their results are directly comparable:
+
+| | `bayesian_optimizer.py` | `prompt_optimizer.py` |
+|---|---|---|
+| What varies | pipeline configuration | prompt text |
+| What is held fixed | prompts (shipped defaults) | pipeline configuration |
+| Proposer | Optuna multi-objective TPE | LLM reflection (GEPA) |
+| Baseline at iteration 0 | `BASELINE_PARAMS` | `BASELINE_PARAMS` + baseline prompt |
+| Metric | NDCG@10 (`tuning/evaluator`) | NDCG@10 (`tuning/evaluator`) |
+| Cost axis | mean rerank docs/query | mean rerank docs/query |
+| Headline number | gain over baseline | gain over baseline |
+| `summary.json` | 18 keys | same 18 keys + 2 |
+
+`BASELINE_PARAMS` has exactly one definition, in `beir_full_benchmark.py`, which
+both scripts import — so "gain over baseline" means the same thing on both sides
+rather than two similar-looking dicts drifting apart.
+
+Objectives are (maximize NDCG@10, minimize mean rerank docs), so a run yields a
+Pareto front, not a single winner.
+
+### 3.2 Apples-to-apples comparison
+
+Run both with the same `--dataset`, `--retriever`, `--n-queries`, `--iterations`,
+`--rerank-depth` and `--seeds`. Twelve CLI flags are shared verbatim for exactly
+this reason. The two `gain_mean` figures then answer one question: **for the same
+number of pipeline evaluations, does tuning the configuration or tuning the
+prompt buy more retrieval quality?**
+
+```bash
+python examples/bayesian_optimizer.py --dataset nfcorpus --rerankers llm \
+    --iterations 20 --n-queries 20 --rerank-depth 10 --seeds 42,43,44 \
+    --out-dir ./cmp_bayes
+python examples/prompt_optimizer.py  --dataset nfcorpus --target reranker \
+    --iterations 20 --n-queries 20 --rerank-depth 10 --seeds 42,43,44 \
+    --out-dir ./cmp_prompt
+
+python - <<'EOF'
+import json
+for d in ("cmp_bayes", "cmp_prompt"):
+    s = json.load(open(f"{d}/summary.json"))
+    print(f"{s['run_type']:<26} baseline={s['baseline_ndcg_mean']:.4f} "
+          f"best={s['best_ndcg_mean']:.4f} gain={s['gain_mean']:+.4f} "
+          f"+/-{s['gain_stdev']:.4f}")
+EOF
+```
+
+**Use `--rerankers llm` on the Bayesian side for that comparison.** Otherwise the
+config search runs a cross-encoder while the prompt search runs the pointwise LLM
+reranker, and the two NDCG numbers describe different pipelines. If you only care
+about the configuration question, drop it and use the cheaper default.
+
+`--sampler random` gives the third arm: same space, same budget, no surrogate
+model. At budgets under ~50 trials it is the only way to know whether TPE is
+beating chance.
+
+### 3.3 Usage
+
+```bash
+# cost projection, evaluates nothing
+python examples/bayesian_optimizer.py --dataset nfcorpus --dry-run
+
+# standard run
+python examples/bayesian_optimizer.py --dataset nfcorpus \
+    --iterations 50 --n-queries 50 --seeds 42,43,44
+
+# random-search control
+python examples/bayesian_optimizer.py --dataset nfcorpus --sampler random \
+    --iterations 50 --n-queries 50 --seeds 42,43,44
+
+# persist the study for optuna-dashboard, and resume into it
+python examples/bayesian_optimizer.py --dataset nfcorpus \
+    --storage sqlite:///nfcorpus.db
+
+# verify a tuned config against the baseline across seeds
+python examples/bayesian_optimizer.py --dataset nfcorpus \
+    --compare bayes_opt_results/best_config.yaml --seeds 42,43,44
+```
+
+### 3.4 CLI reference
+
+```
+  --dataset nfcorpus        BEIR dataset (same catalogue as the sweep script)
+  --retriever bm25          first-stage retriever, held fixed
+
+evaluation
+  --n-queries 50            queries per evaluation
+  --rerank-depth 50         baseline rerank budget; API calls/query when --rerankers llm
+  --retrieval-depth 200     first-stage depth; also caps the tuner's depth range
+  --seed 42 / --seeds 42,43,44
+
+optimization
+  --iterations 50           Optuna trials per seed (matches prompt_optimizer --iterations)
+  --sampler {tpe,random}    random = control arm
+  --rerankers noop,cross-encoder    types the tuner may choose from
+  --space {restricted,full}         full adds llm_rewrite/reformir — needs an API key
+  --max-cost 200                    cost pruner + hypervolume reference
+  --max-trial-seconds 1800          runtime pruner
+  --pareto-pruning                  also prune predicted-dominated trials
+  --storage sqlite:///study.db      resumable, optuna-dashboard compatible
+  --ce-models / --monot5-models / --llm-reranker-model
+  --search-space-json FILE          arbitrary RAGtuneSearchSpace overrides
+
+io
+  --index-dir ./indexes --out-dir ./bayes_opt_results
+  --compare FILE.yaml       evaluate a tuned config against the baseline, then exit
+  --dry-run
+```
+
+### 3.5 Outputs
+
+```
+bayes_opt_results/
+├── summary.json              the 18-key schema shared with prompt_optimizer.py
+├── history.json              every trial, grouped by seed
+├── trials.csv                flat rows incl. baseline, with all p_* params
+├── best_config.yaml          highest-NDCG config, runnable with `ragtune run`
+└── pareto_configs_s<seed>/   one YAML per Pareto-front trial
+```
+
+The per-seed table printed at the end has one row per seed plus a mean row with
+the standard deviation of the gain — read that spread before believing any single
+number.
+
+### 3.6 Cost
+
+One evaluation = `--n-queries` controller runs, and a run costs
+`(iterations + 1) x seeds` evaluations. With local rerankers the wall time is the
+§2.7 cost model; with `--rerankers llm` it is also
+`(iterations + 1) x seeds x n_queries x rerank_depth` API calls, which `--dry-run`
+prints before you spend anything.
+
+---
+
+## 4. Prompt optimizer
+
+### 4.1 What it is — and is not
 
 It evolves **prompt text**. The two existing optimizers both search structured
 parameters and never change a prompt:
@@ -352,7 +527,7 @@ reflective mutation. Only the genome differs. (This is also what GEPA is in the
 literature, where the evolved artifact *is* the prompt; RAGtune's use of the
 machinery on a config space is the adaptation.)
 
-### 3.2 Targets
+### 4.2 Targets
 
 | Target | Component | Placeholders | Output contract |
 |---|---|---|---|
@@ -365,7 +540,7 @@ an invalid template raises inside `str.format()` per query, and the evaluator
 scores that 0.0 — so without validation the optimizer learns from a crash rather
 than from a bad prompt. Rejections are fed back into the reflection context.
 
-### 3.3 Usage
+### 4.3 Usage
 
 ```bash
 # cost projection only, no API calls
@@ -384,7 +559,7 @@ Key flags: `--optimizer-model` (proposes prompts) vs `--component-model` (runs
 inside the pipeline); `--n-failures` (worst queries shown to the reflector);
 `--seed-prompt` (start from a given YAML instead of `prompts.yaml`).
 
-### 3.4 Cost
+### 4.4 Cost
 
 Pointwise reranking is **one API call per document**, so a full evaluation costs
 `n_queries × rerank_depth` calls:
@@ -399,7 +574,7 @@ At defaults (20 iterations, 20 queries, depth 10, minibatch 5) that is ~3,220
 calls. The script prints the projection and refuses to exceed `--max-calls`
 (default 10,000) without `--yes`.
 
-### 3.5 Outputs
+### 4.5 Outputs
 
 ```
 prompt_opt_results/
@@ -411,7 +586,7 @@ prompt_opt_results/
 
 ---
 
-## 4. Reading the results
+## 5. Reading the results
 
 - **`vs baseline` can be negative and that's not a bug.** At small budgets most
   trials are random startup draws (`n_startup_trials = max(5, budget//8)`), so
@@ -429,7 +604,7 @@ prompt_opt_results/
 
 ---
 
-## 5. Known issues
+## 6. Known issues
 
 | Issue | Status |
 |---|---|
@@ -441,9 +616,10 @@ prompt_opt_results/
 
 ---
 
-## 6. Related
+## 7. Related
 
 - `specs/spec-mobo-tuning.md` — the config search space and evaluation protocol
+- `examples/ragtune_benchmark.ipynb` — the notebook whose TPE arm `bayesian_optimizer.py` extracts
 - `specs/spec-prompt-optimization.md` — the design this prompt optimizer implements
 - `examples/ragtune_benchmark.ipynb` — the Colab notebook these scripts derive from
 - `docs/benchmarks.md` — benchmark triage and integration status
