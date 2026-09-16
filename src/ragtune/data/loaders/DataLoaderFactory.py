@@ -130,12 +130,18 @@ class DataLoaderFactory:
             from ragtune.data.loaders.SkillRetLoader import SkillRetLoader
 
             n_queries = kwargs.pop("n_queries", 0)
+            corpus_fields = kwargs.pop("corpus_fields", None)
+            corpus_sep = kwargs.pop("corpus_sep", "\n")
+            min_relevance = kwargs.pop("min_relevance", 1)
             logger.info(f"[Factory] Creating SkillRetLoader(split={dataset_name!r})")
             return SkillRetLoader(
                 dataset=dataset_name,
                 split=split,
                 n_queries=n_queries,
                 cache_dir=cache_dir,
+                corpus_fields=corpus_fields,
+                corpus_sep=corpus_sep,
+                min_relevance=min_relevance,
             )
 
         # ---- SRA-Bench ----

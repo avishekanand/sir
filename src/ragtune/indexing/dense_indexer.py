@@ -33,8 +33,9 @@ from ragtune.registry import registry
 @dataclass
 class FaissIndexData:
     """Wrapper returned by FaissIndexer.load()."""
-    index: Any            # faiss.Index
-    docnos: List[str]     # positional match to FAISS rows
+
+    index: Any  # faiss.Index
+    docnos: List[str]  # positional match to FAISS rows
     model_name: str
     index_path: str
 
@@ -42,8 +43,9 @@ class FaissIndexData:
 @dataclass
 class NumpyIndexData:
     """Wrapper returned by NumpyIndexer.load()."""
-    vectors: np.ndarray   # [N, dim] float32
-    docnos: List[str]     # positional match to vectors rows
+
+    vectors: np.ndarray  # [N, dim] float32
+    docnos: List[str]  # positional match to vectors rows
     model_name: str
     index_path: str
 
@@ -95,7 +97,9 @@ class DenseIndexer(BaseIndexer):
                 raise ImportError(
                     "sentence-transformers is required: pip install sentence-transformers"
                 )
-            self._model = SentenceTransformer(self.model_name_or_path, device=self.device)
+            self._model = SentenceTransformer(
+                self.model_name_or_path, device=self.device
+            )
             if self.max_length is not None:
                 self._model.max_seq_length = self.max_length
         return self._model.encode(
@@ -136,7 +140,9 @@ class DenseIndexer(BaseIndexer):
         return True
 
     @abstractmethod
-    def _save_vectors(self, vectors: np.ndarray, docnos: List[str], index_path: str) -> None:
+    def _save_vectors(
+        self, vectors: np.ndarray, docnos: List[str], index_path: str
+    ) -> None:
         """Persist vectors + docnos to index_path. Backend-specific."""
 
     @abstractmethod
@@ -147,24 +153,35 @@ class DenseIndexer(BaseIndexer):
     def load(self, index_path: str) -> Any:
         """Load and return a backend-specific index data object."""
 
-    def search(self, query: str, top_k: int, index_path: str, **params) -> List[SearchResult]:
+    def search(
+        self, query: str, top_k: int, index_path: str, **params
+    ) -> List[SearchResult]:
         """Encode query, load the index, and run exact top_k search."""
         data = self.load(index_path)
         query_vec = self._encode_in_batches([query])[0]
         return self._search_vectors(query_vec, data, top_k)
 
     @abstractmethod
-    def _search_vectors(self, query_vec: np.ndarray, data: Any, top_k: int) -> List[SearchResult]:
+    def _search_vectors(
+        self, query_vec: np.ndarray, data: Any, top_k: int
+    ) -> List[SearchResult]:
         """Exact nearest-neighbor search against the loaded index data. Backend-specific."""
 
 
 @registry.indexer("faiss")
 class FaissIndexer(DenseIndexer):
     """
-    Dense indexer: sentence-transformers encoding + FAISS flat inner-product index.
+    Dense indexer: sentence-transformers encoding + FAISS flat index.
+
+    Supports two similarity metrics (configurable via 'metric'):
+      - "ip": inner product (IndexFlatIP). Vectors are L2-normalised so
+        inner product == cosine similarity. This is the default.
+      - "l2": Euclidean distance (IndexFlatL2). Raw, unnormalised vectors.
+        This matches langchain FAISS (FAISS.from_documents → IndexFlatL2),
+        i.e. rahulseetharaman's PR #20 benchmark setup.
 
     Storage layout written to index_path/
-        index.faiss      FAISS IndexFlatIP (vectors are L2-normalised)
+        index.faiss      FAISS index (IndexFlatIP or IndexFlatL2)
         docnos.json      ordered list of doc IDs (positional match to FAISS rows)
         metadata.json    model_name, dim, num_docs
 
@@ -175,7 +192,21 @@ class FaissIndexer(DenseIndexer):
     >>> indexer.search("what is bm25?", top_k=10, index_path="indexes/biology-dense")
     """
 
-    def _save_vectors(self, vectors: np.ndarray, docnos: List[str], index_path: str) -> None:
+    def __init__(self, *args, metric: str = "ip", **kwargs):
+        super().__init__(*args, **kwargs)
+        if metric not in ("ip", "l2"):
+            raise ValueError(f"metric must be 'ip' or 'l2', got {metric!r}")
+        self.metric = metric
+        # L2 (Euclidean) matches langchain FAISS: no L2 normalisation.
+        # Inner-product (cosine) requires L2 normalisation.
+        if metric == "l2":
+            self.normalize = False
+        else:
+            self.normalize = True
+
+    def _save_vectors(
+        self, vectors: np.ndarray, docnos: List[str], index_path: str
+    ) -> None:
         try:
             import faiss
         except ImportError:
@@ -183,7 +214,10 @@ class FaissIndexer(DenseIndexer):
                 "faiss-cpu is required for FaissIndexer: pip install faiss-cpu"
             )
         dim = vectors.shape[1]
-        faiss_index = faiss.IndexFlatIP(dim)
+        if self.metric == "l2":
+            faiss_index = faiss.IndexFlatL2(dim)
+        else:
+            faiss_index = faiss.IndexFlatIP(dim)
         faiss_index.add(vectors)
 
         faiss.write_index(faiss_index, os.path.join(index_path, "index.faiss"))
@@ -191,7 +225,12 @@ class FaissIndexer(DenseIndexer):
             json.dump(docnos, f)
         with open(os.path.join(index_path, "metadata.json"), "w") as f:
             json.dump(
-                {"model_name": self.model_name_or_path, "dim": dim, "num_docs": len(docnos)},
+                {
+                    "model_name": self.model_name_or_path,
+                    "dim": dim,
+                    "num_docs": len(docnos),
+                    "metric": self.metric,
+                },
                 f,
             )
 
@@ -222,11 +261,17 @@ class FaissIndexer(DenseIndexer):
     def _search_vectors(
         self, query_vec: np.ndarray, data: FaissIndexData, top_k: int
     ) -> List[SearchResult]:
-        scores, indices = data.index.search(query_vec.reshape(1, -1).astype(np.float32), top_k)
+        scores, indices = data.index.search(
+            query_vec.reshape(1, -1).astype(np.float32), top_k
+        )
         results = []
         for score, idx in zip(scores[0], indices[0]):
             if idx == -1:
                 continue
+            # IndexFlatL2 returns distances (lower = more similar). Negate so
+            # higher score = more similar, consistent with IP/cosine semantics.
+            if self.metric == "l2":
+                score = -score
             results.append(SearchResult(doc_id=data.docnos[idx], score=float(score)))
         return results
 
@@ -251,7 +296,9 @@ class NumpyIndexer(DenseIndexer):
     >>> indexer.search("what is bm25?", top_k=10, index_path="indexes/biology-numpy")
     """
 
-    def _save_vectors(self, vectors: np.ndarray, docnos: List[str], index_path: str) -> None:
+    def _save_vectors(
+        self, vectors: np.ndarray, docnos: List[str], index_path: str
+    ) -> None:
         np.save(os.path.join(index_path, "vectors.npy"), vectors)
         with open(os.path.join(index_path, "docnos.json"), "w") as f:
             json.dump(docnos, f)
@@ -288,4 +335,7 @@ class NumpyIndexer(DenseIndexer):
     ) -> List[SearchResult]:
         scores = data.vectors @ query_vec
         top_indices = np.argsort(-scores)[:top_k]
-        return [SearchResult(doc_id=data.docnos[i], score=float(scores[i])) for i in top_indices]
+        return [
+            SearchResult(doc_id=data.docnos[i], score=float(scores[i]))
+            for i in top_indices
+        ]

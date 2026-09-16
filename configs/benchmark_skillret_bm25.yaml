@@ -1,0 +1,63 @@
+# =============================================================================
+# Benchmark Configuration — SKILLRET with Sparse BM25 Retriever (default)
+# =============================================================================
+# The default cassette: BM25 via PyTerrier. Compare with the FAISS config —
+# only index_type / indexer_params change. Everything else is identical.
+# =============================================================================
+
+benchmark: "skillret"
+subset: ""
+queries: 20
+top_k: 50
+eval_ks: [10, 50]
+
+# ── Retriever cassette ──────────────────────────────────────────────────────
+index_type: "pyterrier"
+wmodel: "BM25"
+
+# ── Index storage ───────────────────────────────────────────────────────────
+# Where to store built indexes. Defaults to <workspace>/indexes/benchmarks.
+# Set any absolute or relative path to store elsewhere.
+index_dir: "indexes/benchmarks"
+force_reindex: false
+
+# ── Scenarios (identical to FAISS config — proving cassettes are swappable) ─
+scenarios:
+  - name: "bm25_baseline"
+    pipeline:
+      components:
+        reranker: {type: "noop"}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 1}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 0
+          tokens: 100000
+          latency_ms: 60000
+
+  - name: "bm25_rerank_tight"
+    pipeline:
+      components:
+        reranker: {type: "cross-encoder", params: {batch_size: 256}}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 2}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 5
+          tokens: 100000
+          latency_ms: 600000
+
+  - name: "bm25_rerank_loose"
+    pipeline:
+      components:
+        reranker: {type: "cross-encoder", params: {batch_size: 256}}
+        estimator: {type: "baseline"}
+        scheduler: {type: "active-learning", params: {batch_size: 10}}
+        assembler: {type: "greedy", params: {max_docs: 100}}
+      budget:
+        limits:
+          rerank_docs: 30
+          tokens: 100000
+          latency_ms: 600000

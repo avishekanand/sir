@@ -87,10 +87,18 @@ class CountingScheduler(BaseScheduler):
         batch = eligible[
             : min(self.batch_size, budget.remaining_rerank_docs, len(eligible))
         ]
+        # Estimate per-batch token cost from document metadata.
+        # Shuvam (2026-07-27): Uses same estimation as production schedulers.
+        batch_tokens = sum(it.metadata.get("token_count", 512) for it in batch)
+
+        # Skip batch if token budget is insufficient
+        if budget.remaining_tokens > 0 and batch_tokens > budget.remaining_tokens:
+            return None
+
         return BatchProposal(
             doc_ids=[item.doc_id for item in batch],
             strategy="noop",
-            expected_cost=CostObject(docs=len(batch), calls=1),
+            expected_cost=CostObject(docs=len(batch), calls=1, tokens=batch_tokens),
         )
 
 
@@ -137,12 +145,6 @@ def test_token_budget_zero_prevents_all_reranking():
     assert output.final_budget_state.get("rerank_docs", 0) == 0
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="Token budget not consumed during iterative loop (refs #1). "
-    "Currently tokens=3 does not limit reranking because tokens "
-    "are only consumed post-loop during assembly.",
-)
 def test_positive_token_budget_limits_reranking_iterations():
     """
     Test that a positive token budget constrains the number of reranking iterations.
@@ -175,7 +177,7 @@ def test_positive_token_budget_limits_reranking_iterations():
     output = controller.run("test query")
 
     rerank_docs_limit = 20
-    rerank_docs_consumed = output.final_budget_state["rerank_docs"]
+    rerank_docs_consumed = output.final_budget_state.get("rerank_docs", 0)
 
     assert rerank_docs_consumed < rerank_docs_limit, (
         f"Token budget of 3 should prevent consuming all {rerank_docs_limit} "
@@ -184,12 +186,6 @@ def test_positive_token_budget_limits_reranking_iterations():
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Token budget not consumed during iterative loop (refs #1). "
-    "The token budget should constrain reranking independently of "
-    "rerank_docs, but currently tokens and rerank_docs are decoupled.",
-)
 def test_token_budget_constrains_reranking_before_docs_exhausted():
     """
     Test that the token budget stops reranking even when rerank_docs remain.
@@ -219,7 +215,7 @@ def test_token_budget_constrains_reranking_before_docs_exhausted():
     output = controller.run("test query")
 
     rerank_docs_limit = 50
-    rerank_docs_consumed = output.final_budget_state["rerank_docs"]
+    rerank_docs_consumed = output.final_budget_state.get("rerank_docs", 0)
 
     assert rerank_docs_consumed < rerank_docs_limit, (
         f"Token budget of 3 should limit reranking before consuming all "
@@ -228,12 +224,6 @@ def test_token_budget_constrains_reranking_before_docs_exhausted():
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Token budget not consumed during iterative loop (refs #1). "
-    "Tokens should accumulate via tracker.consume() during the loop, "
-    "not just via try_consume_tokens() during assembly.",
-)
 def test_tokens_consumed_during_loop_not_just_assembly():
     """
     Test that token consumption reflects loop activity, not just assembly activity.
@@ -278,12 +268,6 @@ def test_tokens_consumed_during_loop_not_just_assembly():
     )
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="Token budget not consumed during iterative loop (refs #1). "
-    "The loop should not perform reranking work that cannot produce "
-    "useful output due to token exhaustion.",
-)
 def test_low_token_budget_prevents_wasted_reranking():
     """
     Test that a token budget insufficient for any document prevents reranking.
@@ -314,7 +298,7 @@ def test_low_token_budget_prevents_wasted_reranking():
 
     output = controller.run("test query")
 
-    rerank_docs_consumed = output.final_budget_state["rerank_docs"]
+    rerank_docs_consumed = output.final_budget_state.get("rerank_docs", 0)
 
     assert rerank_docs_consumed == 0, (
         f"Token budget of 1 should prevent all reranking because no document "
@@ -324,12 +308,6 @@ def test_low_token_budget_prevents_wasted_reranking():
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Schedulers do not populate per-batch token estimates (refs #1). "
-    "BatchProposal.expected_cost.tokens should reflect estimated token "
-    "consumption for the selected batch to allow token-aware scheduling.",
-)
 def test_schedulers_provide_per_batch_token_estimates():
     """
     Test that schedulers populate expected_cost.tokens with per-batch estimates.
@@ -354,7 +332,7 @@ def test_schedulers_provide_per_batch_token_estimates():
     pool.apply_priorities({f"doc_{i}": 1.0 - i * 0.1 for i in range(5)})
 
     budget = RemainingBudgetView(
-        remaining_tokens=100, remaining_rerank_docs=10, remaining_rerank_calls=5
+        remaining_tokens=10000, remaining_rerank_docs=10, remaining_rerank_calls=5
     )
     scheduler = ActiveLearningScheduler(batch_size=2)
     proposal = scheduler.select_batch(pool, budget)

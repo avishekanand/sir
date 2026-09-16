@@ -42,16 +42,6 @@ class ConfigLoader:
 
         budget = CostBudget(limits=limits)
 
-        from ragtune.core.interfaces import (
-            BaseRetriever,
-            BaseReranker,
-            BaseReformulator,
-            BaseAssembler,
-            BaseScheduler,
-            BaseEstimator,
-            BaseFeedback,
-        )
-
         def create_component(category: str, conf: Any):
             if isinstance(conf, list):
                 # Special case for estimators: wrap in CompositeEstimator
@@ -153,7 +143,8 @@ class ConfigLoader:
         each optionally with a 'name' field. The retriever is injected into
         each config so it's not re-created per scenario.
 
-        Defaults (3 scenarios): BM25 baseline, Static Rerank, RAGtune(budget=10)
+        Defaults (7 scenarios): BM25 baseline + 6 CrossEncoder variants
+        (tight/medium/loose x baseline/similarity estimators).
         """
         raw = os.environ.get("SCENARIOS", "")
         if raw:
