@@ -10,7 +10,14 @@ adding one branch here and implementing a BaseDataLoader subclass.
 import logging
 from typing import Optional
 
-from ragtune.data.constants import Benchmark, Dataset, BRIGHT_TASKS, FRESHSTACK_TOPICS, Split
+from ragtune.data.constants import (
+    Benchmark,
+    Dataset,
+    BRIGHT_TASKS,
+    FRESHSTACK_TOPICS,
+    COIR_DATASETS,
+    Split,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +43,8 @@ class DataLoaderFactory:
         dataset_name : str
             Task / dataset name, e.g. 'biology', 'langchain', 'beir/scifact'.
         benchmark_name : str
-            One of Benchmark.BRIGHT, Benchmark.FRESHSTACK, Benchmark.BEIR.
+            One of Benchmark.BRIGHT, Benchmark.FRESHSTACK, Benchmark.COIR,
+            Benchmark.BEIR.
         split : str
             Data split.
         long_context : bool
@@ -76,6 +84,17 @@ class DataLoaderFactory:
                 topic=dataset_name,
                 split=split,
                 cache_dir=cache_dir,
+            )
+
+        # ---- CoIR ----
+        if benchmark_name == Benchmark.COIR.upper() or dataset_name in COIR_DATASETS:
+            from ragtune.data.loaders.CoIRLoader import CoIRLoader
+            logger.info(f"[Factory] Creating CoIRLoader(dataset={dataset_name!r})")
+            return CoIRLoader(
+                dataset=dataset_name,
+                split=split,
+                cache_dir=cache_dir,
+                **kwargs,
             )
 
         # ---- BEIR via HuggingFace (mteb mirror) ----
