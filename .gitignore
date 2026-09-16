@@ -12,3 +12,5 @@ ragtune_config.yaml
 .DS_Store
 proposals/
 .superpowers/
+indexes/sbs_agents.md
+sbs_agents.md

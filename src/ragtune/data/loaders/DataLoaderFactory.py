@@ -1,6 +1,6 @@
 """
 DataLoader Factory
-==================
+=================
 Maps (benchmark, dataset) pairs to the appropriate loader class.
 
 This is the single registration point – adding a new benchmark means
@@ -10,7 +10,15 @@ adding one branch here and implementing a BaseDataLoader subclass.
 import logging
 from typing import Optional
 
-from ragtune.data.constants import Benchmark, Dataset, BRIGHT_TASKS, FRESHSTACK_TOPICS, Split
+from ragtune.data.constants import (
+    Benchmark,
+    Dataset,
+    BRIGHT_TASKS,
+    FRESHSTACK_TOPICS,
+    TOOLRET_SUBSETS,
+    SRA_BENCH_SUBSETS,
+    Split,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +66,7 @@ class DataLoaderFactory:
         # ---- BRIGHT ----
         if benchmark_name == Benchmark.BRIGHT or dataset_name in BRIGHT_TASKS:
             from ragtune.data.loaders.BRIGHTLoader import BRIGHTLoader
+
             task = dataset_name
             logger.info(f"[Factory] Creating BRIGHTLoader(task={task!r})")
             return BRIGHTLoader(
@@ -69,8 +78,12 @@ class DataLoaderFactory:
             )
 
         # ---- FreshStack ----
-        if benchmark_name == Benchmark.FRESHSTACK.upper() or dataset_name in FRESHSTACK_TOPICS:
+        if (
+            benchmark_name == Benchmark.FRESHSTACK.upper()
+            or dataset_name in FRESHSTACK_TOPICS
+        ):
             from ragtune.data.loaders.FreshStackLoader import FreshStackLoader
+
             logger.info(f"[Factory] Creating FreshStackLoader(topic={dataset_name!r})")
             return FreshStackLoader(
                 topic=dataset_name,
@@ -83,6 +96,7 @@ class DataLoaderFactory:
             hf_name = kwargs.pop("hf_dataset_name", f"mteb/{dataset_name}")
             subset = kwargs.pop("subset", None)
             from ragtune.data.loaders.HuggingFaceLoader import HuggingFaceLoader
+
             logger.info(
                 f"[Factory] Creating HuggingFaceLoader for BEIR "
                 f"hf={hf_name!r} subset={subset!r}"
@@ -95,6 +109,51 @@ class DataLoaderFactory:
                 **kwargs,
             )
 
+        # ---- ToolRet ----
+        if (
+            benchmark_name == Benchmark.TOOLRET.upper()
+            or dataset_name in TOOLRET_SUBSETS
+        ):
+            from ragtune.data.loaders.ToolRetLoader import ToolRetLoader
+
+            n_queries = kwargs.pop("n_queries", 0)
+            logger.info(f"[Factory] Creating ToolRetLoader(dataset={dataset_name!r})")
+            return ToolRetLoader(
+                dataset=dataset_name,
+                split=split,
+                n_queries=n_queries,
+                cache_dir=cache_dir,
+            )
+
+        # ---- SkillRet ----
+        if benchmark_name == Benchmark.SKILLRET.upper():
+            from ragtune.data.loaders.SkillRetLoader import SkillRetLoader
+
+            n_queries = kwargs.pop("n_queries", 0)
+            logger.info(f"[Factory] Creating SkillRetLoader(split={dataset_name!r})")
+            return SkillRetLoader(
+                dataset=dataset_name,
+                split=split,
+                n_queries=n_queries,
+                cache_dir=cache_dir,
+            )
+
+        # ---- SRA-Bench ----
+        if (
+            benchmark_name == Benchmark.SRA_BENCH.upper()
+            or dataset_name in SRA_BENCH_SUBSETS
+        ):
+            from ragtune.data.loaders.SRABenchLoader import SRABenchLoader
+
+            n_queries = kwargs.pop("n_queries", 0)
+            logger.info(f"[Factory] Creating SRABenchLoader(dataset={dataset_name!r})")
+            return SRABenchLoader(
+                dataset=dataset_name,
+                split=split,
+                n_queries=n_queries,
+                cache_dir=cache_dir,
+            )
+
         # ---- ir_datasets fallback ----
         # dataset_name is expected to be a full ir_datasets path,
         # e.g. 'beir/scifact/test'
@@ -103,6 +162,7 @@ class DataLoaderFactory:
             "Attempting IRDatasetsLoader as fallback."
         )
         from ragtune.data.loaders.IRDatasetsLoader import IRDatasetsLoader
+
         return IRDatasetsLoader(
             dataset_id=dataset_name,
             split=split,
