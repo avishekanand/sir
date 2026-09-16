@@ -44,6 +44,21 @@ class ConfigLoader:
             d = d.setdefault(k, {})
         d[keys[-1]] = value
 
+    def set_prompt(self, key_path: str, value: Any) -> None:
+        """
+        Override a prompt at runtime using dot notation.
+
+        Mirrors set(), but targets the prompt store that get_prompt() reads —
+        _config and _prompts are separate dicts, so set() is not a substitute.
+        Used by prompt optimization to swap templates between evaluations
+        without rewriting config/prompts.yaml.
+        """
+        keys = key_path.split(".")
+        d = self._prompts
+        for k in keys[:-1]:
+            d = d.setdefault(k, {})
+        d[keys[-1]] = value
+
     def _get_recursive(self, data: Dict, key_path: str, default: Any) -> Any:
         keys = key_path.split(".")
         val = data
