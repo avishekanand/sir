@@ -159,33 +159,10 @@ FALLBACK_PROMPTS: Dict[str, Dict[str, str]] = {
     },
 }
 
-# Fixed pipeline around the prompt under test. Only the prompt varies.
-PIPELINE_PARAMS: Dict[str, Any] = {
-    "reranker_type": "noop",
-    "reformulator_type": "identity",
-    "estimator_type": "baseline",
-    "scheduler_type": "active-learning",
-    "feedback_type": "none",
-    "original_query_depth": 50,
-    "depth_per_reformulation": 5,
-    "max_pool_size": 50,
-    "near_duplicate_threshold": 0.8,
-    "assembler_max_docs": 20,
-    "budget_rerank_docs": 10,
-    "budget_reformulations": 0,
-    "scheduler_batch_size": 5,
-    "gd_llm_limit": 3,
-    "gd_ce_limit": 10,
-    "ce_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-    "monot5_model": "castorini/monot5-base-msmarco",
-    "monot5_batch_size": 16,
-    "reformulator_model": "gpt-4o-mini",
-    "reformulator_n_variants": 3,
-    "similarity_model": "all-MiniLM-L6-v2",
-    "min_reranked_for_regression": 3,
-    "budget_stop_token_threshold": 0.9,
-}
-
+# The pipeline around the prompt under test is BASELINE_PARAMS, imported from
+# beir_full_benchmark below — the same dict bayesian_optimizer.py starts its
+# search from. One definition, so "gain over baseline" means the same thing in
+# both scripts and the two runs stay comparable.
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Candidates
@@ -310,7 +287,7 @@ def load_seed_prompt(target: PromptTarget, path: Optional[str]) -> Dict[str, str
 
 def build_params(target: PromptTarget, args) -> Dict[str, Any]:
     """Fixed pipeline with the target component switched to its LLM version."""
-    params = dict(PIPELINE_PARAMS)
+    params = dict(BASELINE_PARAMS)
     params["original_query_depth"] = args.retrieval_depth
     params["max_pool_size"] = args.retrieval_depth
     params["budget_rerank_docs"] = args.rerank_depth
@@ -551,16 +528,56 @@ def _mean(values) -> float:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def write_results(history: List[PromptCandidate], target: PromptTarget,
+def write_results(runs: List[Tuple[int, List[PromptCandidate]]], target: PromptTarget,
                   out_dir: Path, args) -> Optional[PromptCandidate]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    history = [c for _, h in runs for c in h]
     valid = [c for c in history if not c.error]
     if not valid:
         print("\n  No prompt survived evaluation — nothing to write.")
         return None
 
     best = max(valid, key=lambda c: c.ndcg_at_10)
-    baseline = history[0]
+    baseline = runs[0][1][0]
+
+    # Same schema bayesian_optimizer.py writes, so the two runs can be diffed
+    # field by field without reshaping either side.
+    per_seed_best, per_seed_gain, baselines = [], [], []
+    for _seed, hist in runs:
+        ok = [c for c in hist if not c.error]
+        if not ok:
+            continue
+        base_n = hist[0].ndcg_at_10
+        best_n = max(c.ndcg_at_10 for c in ok)
+        baselines.append(base_n)
+        per_seed_best.append(best_n)
+        per_seed_gain.append(best_n - base_n)
+
+    summary = {
+        "run_type": f"prompt-gepa-{target.name}",
+        "searches": "prompt_text",
+        "dataset": args.dataset,
+        "retriever": args.retriever,
+        "n_queries": args.n_queries,
+        "rerank_depth": args.rerank_depth,
+        "retrieval_depth": args.retrieval_depth,
+        "iterations": args.iterations,
+        "seeds": [seed for seed, _ in runs],
+        "baseline_ndcg_mean": round(_mean(baselines), 4),
+        "best_ndcg_mean": round(_mean(per_seed_best), 4),
+        "best_ndcg_stdev": round(_stdev(per_seed_best), 4),
+        "gain_mean": round(_mean(per_seed_gain), 4),
+        "gain_stdev": round(_stdev(per_seed_gain), 4),
+        "evaluations_per_seed": args.iterations + 1,
+        "wall_seconds_total": round(getattr(args, "_wall_seconds", 0.0), 1),
+        "hypervolume_mean": 0.0,   # prompt runs vary one axis; cost is ~constant
+        "pareto_size_mean": round(_mean(
+            len(pareto_front(h)) for _s, h in runs
+        ), 2),
+        "api_calls_total": sum(c.api_calls for c in history),
+        "rejected_candidates": len(history) - len(valid),
+    }
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 
     # A prompts.yaml fragment: paste under the matching key, or load with
     # --seed-prompt on a later run.
@@ -583,26 +600,37 @@ def write_results(history: List[PromptCandidate], target: PromptTarget,
         ))
 
     (out_dir / "history.json").write_text(json.dumps(
-        {"target": target.name, "dataset": args.dataset, "seed": args.seed,
+        {"run_type": summary["run_type"], "target": target.name,
+         "dataset": args.dataset,
          "n_queries": args.n_queries, "rerank_depth": args.rerank_depth,
          "component_model": args.component_model, "optimizer_model": args.optimizer_model,
-         "candidates": [c.to_dict() for c in history]},
+         "seeds": {str(seed): {"candidates": [c.to_dict() for c in hist]}
+                   for seed, hist in runs}},
         indent=2,
     ))
 
-    gain = best.ndcg_at_10 - baseline.ndcg_at_10
     print("\n" + "=" * 88)
-    print(f"  Prompt optimization — {target.name} on {args.dataset} (seed {args.seed})")
+    print(f"  Prompt optimization ({target.name}) — {args.dataset} / {args.retriever}")
     print("=" * 88)
-    print(f"  baseline prompt   NDCG@10 = {baseline.ndcg_at_10:.4f}")
-    print(f"  best evolved      NDCG@10 = {best.ndcg_at_10:.4f}  (iteration {best.iteration})")
-    print(f"  gain                        {gain:+.4f}")
-    print(f"  evaluated {len(valid)} prompts, rejected {len(history) - len(valid)}, "
-          f"~{sum(c.api_calls for c in history):,} component API calls")
+    print(f"  {'seed':>6} {'baseline':>10} {'best':>10} {'gain':>9} {'evaluated':>10} {'rejected':>9}")
+    print("  " + "-" * 62)
+    for seed, hist in runs:
+        ok = [c for c in hist if not c.error]
+        base_n = hist[0].ndcg_at_10
+        best_n = max((c.ndcg_at_10 for c in ok), default=0.0)
+        print(f"  {seed:>6} {base_n:>10.4f} {best_n:>10.4f} {best_n - base_n:>+9.4f} "
+              f"{len(ok):>10} {len(hist) - len(ok):>9}")
+    print("  " + "-" * 62)
+    print(f"  {'mean':>6} {summary['baseline_ndcg_mean']:>10.4f} "
+          f"{summary['best_ndcg_mean']:>10.4f} {summary['gain_mean']:>+9.4f}"
+          f"   +/- {summary['gain_stdev']:.4f} over {len(runs)} seed(s)")
+    print("=" * 88)
+    print(f"  ~{summary['api_calls_total']:,} component API calls   "
+          f"{summary['evaluations_per_seed']} evaluations/seed")
     print(f"  written to {out_dir}/")
-    if abs(gain) < 0.02:
-        print("  NOTE: a gain under ~0.02 NDCG on a single seed is within noise. "
-              "Confirm with --compare over several seeds before adopting.")
+    if len(runs) < 3:
+        print("  NOTE: fewer than 3 seeds — a gain under ~0.02 NDCG is within noise. "
+              "Confirm with --compare before adopting.")
     print("=" * 88)
     return best
 
@@ -662,7 +690,8 @@ def compare_prompts(target: PromptTarget, retriever_factory, args) -> int:
 # rather than duplicated; both live in examples/.
 try:
     from beir_full_benchmark import (  # noqa: E402
-        DATASETS, build_sparse_index, init_pyterrier, make_retriever,
+        BASELINE_PARAMS, DATASETS, build_sparse_index, init_pyterrier,
+        make_retriever, _mean as _shared_mean, _stdev,
     )
 except ImportError as _exc:  # pragma: no cover - only when run outside examples/
     raise SystemExit(
@@ -677,12 +706,13 @@ def estimate_calls(args) -> Dict[str, int]:
     # Assume half the proposals survive screening; that is what the pilot runs
     # showed, and it is the number the warning is based on.
     accepted = max(1, args.iterations // 2)
+    n_seeds = len(getattr(args, "seed_list", [args.seed]))
     return {
-        "baseline": full,
-        "screening": args.iterations * mini,
-        "full_evals": accepted * full,
-        "reflection": args.iterations,
-        "total": full + args.iterations * mini + accepted * full + args.iterations,
+        "baseline": full * n_seeds,
+        "screening": args.iterations * mini * n_seeds,
+        "full_evals": accepted * full * n_seeds,
+        "reflection": args.iterations * n_seeds,
+        "total": n_seeds * (full + args.iterations * mini + accepted * full + args.iterations),
     }
 
 
@@ -787,15 +817,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.compare:
         return compare_prompts(target, retriever_factory, args)
 
-    eval_ds = EvalDataset.from_pyterrier_irds(
-        irds_id=DATASETS[args.dataset]["irds_id"], n_queries=args.n_queries, seed=args.seed
-    )
-    print(f"  [queries] {len(eval_ds.queries)} topics loaded")
-
     t0 = time.time()
-    history = optimize(target, retriever_factory(), eval_ds, args)
-    write_results(history, target, Path(args.out_dir), args)
-    print(f"  wall time: {(time.time() - t0) / 60:.1f} min")
+    runs: List[Tuple[int, List[PromptCandidate]]] = []
+    for seed in args.seed_list:
+        args.seed = seed  # the GEPA rng and the query sample both read this
+        eval_ds = EvalDataset.from_pyterrier_irds(
+            irds_id=DATASETS[args.dataset]["irds_id"], n_queries=args.n_queries, seed=seed
+        )
+        print(f"\n  [seed {seed}] {len(eval_ds.queries)} topics loaded")
+        runs.append((seed, optimize(target, retriever_factory(), eval_ds, args)))
+
+    args._wall_seconds = time.time() - t0
+    write_results(runs, target, Path(args.out_dir), args)
+    print(f"  wall time: {args._wall_seconds / 60:.1f} min")
     return 0
 
 
