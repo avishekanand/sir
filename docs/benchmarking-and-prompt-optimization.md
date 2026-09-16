@@ -20,7 +20,9 @@ so their NDCG@10 numbers are directly comparable to each other and to
 
 ---
 
-## 1. Installation
+## 1. Installation & running
+
+### 1.1 Install
 
 ```bash
 # 1. environment (repo needs Python >= 3.9)
@@ -49,6 +51,56 @@ Before a long sweep, also confirm the dataset IDs resolve:
 
 ```bash
 python examples/beir_full_benchmark.py --validate-datasets --datasets standard
+```
+
+### 1.2 Run the sweep
+
+```bash
+# 0. ALWAYS size it first — prints the grid and cost projection, evaluates nothing
+python examples/beir_full_benchmark.py --preset exhaustive --plan
+
+# 1. the practical full sweep on one GPU (~45 GPU-h)
+nohup python examples/beir_full_benchmark.py \
+    --preset gpu-full --device cuda \
+    --index-dir ./indexes --out-dir ./benchmark_results \
+    > bench.log 2>&1 &
+tail -f bench.log
+
+# 2. the maximal grid (~629 GPU-h) — shard by dataset group, one per machine
+python examples/beir_full_benchmark.py --preset exhaustive --device cuda \
+    --datasets small       --out-dir ./results_small
+python examples/beir_full_benchmark.py --preset exhaustive --device cuda \
+    --datasets standard    --out-dir ./results_standard
+python examples/beir_full_benchmark.py --preset exhaustive --device cuda \
+    --datasets cqadupstack --out-dir ./results_cqa
+python examples/beir_full_benchmark.py --preset exhaustive --device cuda \
+    --datasets heavy --allow-heavy --out-dir ./results_heavy
+
+# 3. after a crash: same flags + --resume (finished units skipped, indexes reused)
+python examples/beir_full_benchmark.py --preset gpu-full --device cuda --resume
+
+# 4. rebuild tables/plots from state.json alone — no JVM, no re-evaluation
+python examples/beir_full_benchmark.py --preset gpu-full --report-only
+
+# 5. prompt optimization (needs OPENAI_API_KEY)
+python examples/prompt_optimizer.py --dataset nfcorpus --target reranker --dry-run
+python examples/prompt_optimizer.py --dataset nfcorpus --target reranker \
+    --iterations 20 --n-queries 20 --rerank-depth 10
+```
+
+**Sharding notes.** Give every shard its own `--out-dir`: each writes a
+`state.json` and two shards sharing one would overwrite each other's progress.
+A shared `--index-dir` is fine and saves re-indexing, as long as two shards
+aren't building the *same* dataset's index at the same time — so shard by
+dataset group, never by retriever. There is no built-in merge step; combine
+shards afterwards by concatenating their `trials.csv` / `baseline.csv`.
+
+**Before committing to days of GPU time**, run the smoke preset end to end on
+the target machine — it exercises indexing, retrieval, reranking, tuning and
+reporting in about 20 minutes:
+
+```bash
+python examples/beir_full_benchmark.py --preset smoke
 ```
 
 ### Three installation traps
