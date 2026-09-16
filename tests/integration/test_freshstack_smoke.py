@@ -139,44 +139,73 @@ def test_metric_raises_instead_of_silently_falling_back(bfs):
 # ---------------------------------------------------------------------------
 
 
-def test_scenarios_are_distinctly_configured(bfs):
+@pytest.fixture
+def scenarios(bfs, monkeypatch):
+    """
+    The three configured scenarios, with SimilarityEstimator stubbed out.
+
+    `SimilarityEstimator.__init__` constructs a SentenceTransformer, which
+    downloads and loads a model. These tests assert on the wiring — budgets,
+    scheduler batch sizes, assembler depth — so the real estimator is not
+    needed and would make the test require a model download.
+    """
+
+    class StubSimilarityEstimator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(bfs, "SimilarityEstimator", StubSimilarityEstimator)
+    return bfs.build_scenarios(retriever=object())
+
+
+def test_scenarios_are_distinctly_configured(scenarios):
     """
     All three reranking scenarios once reported bit-identical metrics. Guard
     the cause: each must differ in at least one of budget / batch size /
-    estimator, and none may share a controller-mutating component instance.
+    estimator.
     """
-    scenarios = bfs.build_scenarios(retriever=object())
     assert len(scenarios) == 3
 
     signatures = [
         (
             ctrl.budget.limits["rerank_docs"],
             ctrl.scheduler.batch_size,
-            type(ctrl.estimator).__name__,
+            type(ctrl.estimator),
         )
         for _, ctrl in scenarios
     ]
     assert len(set(signatures)) == 3, signatures
 
 
-def test_rerank_docs_is_the_only_binding_budget(bfs):
+def test_scenarios_do_not_share_a_reranker_with_mutable_gold_state(scenarios):
+    """
+    `_OracleReranker.set_gold()` mutates shared state between queries. The
+    module-level `_reranker` is intentionally shared, but each scenario must
+    pick it up by reference so `set_gold` applies — a per-scenario copy would
+    silently evaluate against stale gold.
+    """
+    rerankers = {id(ctrl.reranker) for _, ctrl in scenarios}
+    assert len(rerankers) == 1
+
+
+def test_rerank_docs_is_the_only_binding_budget(scenarios):
     """
     B2: tokens and latency_ms silently capped every scenario at 10 docs. They
     must stay far above anything a scenario reaches so rerank_docs is the sole
     study variable.
     """
-    for name, ctrl in bfs.build_scenarios(retriever=object()):
+    for name, ctrl in scenarios:
         limits = ctrl.budget.limits
         assert limits["tokens"] >= 100_000, name
         assert limits["latency_ms"] >= 600_000, name
         assert limits["rerank_docs"] <= 20, name
 
 
-def test_assembler_returns_full_evaluation_depth(bfs):
+def test_assembler_returns_full_evaluation_depth(scenarios, bfs):
     """
     B4: the assembler emits the reranked head followed by the retrieval tail.
     max_docs must stay at CANDIDATES_TOP_K — the GreedyAssembler default of 10
     is what made Recall@50 an unfair comparison in the first place.
     """
-    for name, ctrl in bfs.build_scenarios(retriever=object()):
+    for name, ctrl in scenarios:
         assert ctrl.assembler.max_docs == bfs.CANDIDATES_TOP_K, name
