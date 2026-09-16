@@ -10,7 +10,8 @@ import importlib
 import pytest
 from unittest.mock import patch
 
-from ragtune.data.loaders.CoIRLoader import CoIRLoader, COIR_DATASETS
+from ragtune.data.constants import COIR_DATASETS
+from ragtune.data.loaders.CoIRLoader import CoIRLoader
 from ragtune.data.datastructures.query import Query
 
 # `loaders/__init__.py` re-exports the CoIRLoader *class* under the package

@@ -15,7 +15,8 @@ import pytest
 
 pytest.importorskip("datasets")
 
-from ragtune.data.loaders.CoIRLoader import CoIRLoader, COIR_DATASETS
+from ragtune.data.constants import COIR_DATASETS
+from ragtune.data.loaders.CoIRLoader import CoIRLoader
 from ragtune.data.datastructures.query import Query
 from ragtune.data.datastructures.sample import Sample
 

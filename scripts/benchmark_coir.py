@@ -39,7 +39,8 @@ from ragtune.components.rerankers import SimulatedReranker
 from ragtune.components.schedulers import ActiveLearningScheduler
 from ragtune.core.budget import CostBudget
 from ragtune.core.controller import RAGtuneController
-from ragtune.data.loaders.CoIRLoader import CoIRLoader, COIR_DATASETS
+from ragtune.data.constants import COIR_DATASETS, Dataset
+from ragtune.data.loaders.CoIRLoader import CoIRLoader
 from ragtune.evaluation.RetrievalEvaluator import RetrievalEvaluator
 from ragtune.utils.config import config
 
@@ -51,7 +52,7 @@ def print_success(msg): _console.print(f"[bold green]{msg}[/bold green]")
 # --- Configuration ---
 
 DATASETS: List[str] = os.environ.get(
-    "COIR_DATASETS", "stackoverflow-qa,cosqa"
+    "COIR_DATASETS", f"{Dataset.STACKOVERFLOW_QA},{Dataset.COSQA}"
 ).split(",")
 QUERIES_PER_DATASET: int = int(os.environ.get("COIR_QUERIES", "20"))
 CANDIDATES_TOP_K: int = 50

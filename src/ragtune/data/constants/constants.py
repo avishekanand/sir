@@ -14,6 +14,7 @@ class Benchmark:
     BRIGHT = "BRIGHT"
     BEIR = "beir"
     FRESHSTACK = "freshstack"
+    COIR = "coir"
 
 
 class Dataset:
@@ -37,6 +38,13 @@ class Dataset:
     ANGULAR = "angular"
     LARAVEL = "laravel"
     GODOT = "godot"
+
+    # CoIR code-retrieval datasets
+    STACKOVERFLOW_QA = "stackoverflow-qa"
+    CODEFEEDBACK_ST = "codefeedback-st"
+    APPS = "apps"
+    COSQA = "cosqa"
+    SYNTHETIC_TEXT2SQL = "synthetic-text2sql"
 
     # Legacy DEXTER datasets
     AMBIGQA = "ambignq"
@@ -73,6 +81,15 @@ FRESHSTACK_TOPICS = [
     Dataset.GODOT,
 ]
 
+# CoIR code-retrieval datasets
+COIR_DATASETS = [
+    Dataset.STACKOVERFLOW_QA,
+    Dataset.CODEFEEDBACK_ST,
+    Dataset.APPS,
+    Dataset.COSQA,
+    Dataset.SYNTHETIC_TEXT2SQL,
+]
+
 
 class Separators:
     TABLE_ROW_SEP = "\n"
@@ -97,6 +114,15 @@ class HFDatasets:
     # the queries test/train split maps to the logical evaluation split.
     FRESHSTACK_CORPUS_SPLIT  = "train"
     FRESHSTACK_QUERIES_SPLIT = "test"
+
+    COIR_ORG = "CoIR-Retrieval"
+    # CoIR follows the BEIR format but with a non-standard config layout:
+    # corpus and queries each live in a same-named config *and* split, while
+    # qrels live in the default config (config=None).
+    COIR_CORPUS_CONFIG   = "corpus"
+    COIR_CORPUS_SPLIT    = "corpus"
+    COIR_QUERIES_CONFIG  = "queries"
+    COIR_QUERIES_SPLIT   = "queries"
 
     # ir_datasets path templates  (formatted with topic/split)
     FRESHSTACK_IRDS_TEMPLATE = "freshstack/{topic}/{split}"

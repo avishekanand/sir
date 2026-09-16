@@ -1,6 +1,6 @@
 from .BaseDataLoader import BaseDataLoader
 from .BRIGHTLoader import BRIGHTLoader, BRIGHTMultiTaskLoader
-from .CoIRLoader import CoIRLoader, COIR_DATASETS
+from .CoIRLoader import CoIRLoader
 from .FreshStackLoader import FreshStackLoader
 from .HuggingFaceLoader import HuggingFaceLoader
 from .IRDatasetsLoader import IRDatasetsLoader
@@ -12,7 +12,6 @@ __all__ = [
     "BRIGHTLoader",
     "BRIGHTMultiTaskLoader",
     "CoIRLoader",
-    "COIR_DATASETS",
     "FreshStackLoader",
     "HuggingFaceLoader",
     "IRDatasetsLoader",

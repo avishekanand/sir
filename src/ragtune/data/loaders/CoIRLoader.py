@@ -8,7 +8,7 @@ CoIR datasets follow the BEIR format but with a non-standard config layout:
   - queries : config="queries", split="queries" (or "test" for some datasets)
   - qrels   : config=None (default config), split="test" (or "train")
 
-Supported datasets:
+Supported datasets (see ``constants.COIR_DATASETS``):
     stackoverflow-qa       — Stack Overflow question → answer
     codefeedback-st        — Single-turn code feedback
     apps                   — Algorithmic problem → solution
@@ -19,28 +19,18 @@ Reference: https://huggingface.co/CoIR-Retrieval
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from ragtune.data.loaders.BaseDataLoader import BaseDataLoader
 from ragtune.data.loaders.HuggingFaceLoader import (
     fetch_hf_split,
-    populate_corpus,
     populate_qrels,
     build_raw_data,
 )
 from ragtune.data.datastructures.query import Query
+from ragtune.data.constants import COIR_DATASETS, HFDatasets, Split
 
 logger = logging.getLogger(__name__)
-
-COIR_DATASETS: List[str] = [
-    "stackoverflow-qa",
-    "codefeedback-st",
-    "apps",
-    "cosqa",
-    "synthetic-text2sql",
-]
-
-_ORG = "CoIR-Retrieval"
 
 
 class CoIRLoader(BaseDataLoader):
@@ -56,7 +46,8 @@ class CoIRLoader(BaseDataLoader):
     Parameters
     ----------
     dataset : str
-        One of the five CoIR dataset names (e.g. ``'stackoverflow-qa'``).
+        One of the five CoIR dataset names (see ``constants.COIR_DATASETS``),
+        e.g. ``'stackoverflow-qa'``.
     split : str
         Evaluation split — determines which qrels split to try first
         (default ``'test'``; falls back to ``'train'`` automatically).
@@ -72,7 +63,7 @@ class CoIRLoader(BaseDataLoader):
     def __init__(
         self,
         dataset: str,
-        split: str = "test",
+        split: str = Split.TEST,
         max_queries: Optional[int] = None,
         max_corpus_docs: Optional[int] = None,
         cache_dir: Optional[str] = None,
@@ -81,7 +72,7 @@ class CoIRLoader(BaseDataLoader):
             raise ValueError(
                 f"Unknown CoIR dataset: {dataset!r}. Valid: {COIR_DATASETS}"
             )
-        super().__init__(dataset=f"{_ORG}/{dataset}", split=split)
+        super().__init__(dataset=f"{HFDatasets.COIR_ORG}/{dataset}", split=split)
         self._coir_dataset = dataset
         self.max_queries = max_queries
         self.max_corpus_docs = max_corpus_docs
@@ -93,7 +84,7 @@ class CoIRLoader(BaseDataLoader):
 
         # ---- Qrels first (need gold IDs before streaming corpus) ----
         qrels_rows = None
-        for qrels_split in [self.split, "train"]:
+        for qrels_split in [self.split, Split.TRAIN]:
             try:
                 qrels_rows = fetch_hf_split(
                     dataset_id, config=None, split=qrels_split, cache_dir=self.cache_dir
@@ -104,7 +95,7 @@ class CoIRLoader(BaseDataLoader):
         if qrels_rows is None:
             raise RuntimeError(
                 f"[CoIRLoader] Could not load qrels for {dataset_id!r} "
-                f"(tried splits: {self.split!r}, 'train')"
+                f"(tried splits: {self.split!r}, {Split.TRAIN!r})"
             )
         populate_qrels(
             self._qrels, qrels_rows,
@@ -119,11 +110,17 @@ class CoIRLoader(BaseDataLoader):
         # ---- Queries (filter to those with qrels, cap to max_queries) ----
         try:
             queries_rows = fetch_hf_split(
-                dataset_id, config="queries", split="queries", cache_dir=self.cache_dir
+                dataset_id,
+                config=HFDatasets.COIR_QUERIES_CONFIG,
+                split=HFDatasets.COIR_QUERIES_SPLIT,
+                cache_dir=self.cache_dir,
             )
         except RuntimeError:
             queries_rows = fetch_hf_split(
-                dataset_id, config="queries", split="test", cache_dir=self.cache_dir
+                dataset_id,
+                config=HFDatasets.COIR_QUERIES_CONFIG,
+                split=Split.TEST,
+                cache_dir=self.cache_dir,
             )
 
         query_objs: Dict[str, Query] = {}
@@ -142,7 +139,10 @@ class CoIRLoader(BaseDataLoader):
         # ---- Corpus (gold-aware cap via streaming) ----
         gold_ids = {did for rels in self._qrels.values() for did in rels}
         corpus_rows = fetch_hf_split(
-            dataset_id, config="corpus", split="corpus", cache_dir=self.cache_dir
+            dataset_id,
+            config=HFDatasets.COIR_CORPUS_CONFIG,
+            split=HFDatasets.COIR_CORPUS_SPLIT,
+            cache_dir=self.cache_dir,
         )
         non_gold_count = 0
         for row in corpus_rows:
