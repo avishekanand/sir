@@ -52,6 +52,19 @@ _TASK_META: Dict[str, Dict] = {
 }
 
 
+def _is_qrels_header(row: List[str]) -> bool:
+    """
+    True if a qrels TSV row is the column-name header.
+
+    Header spelling is not consistent across tasks in dianetc/OBLIQ-Bench:
+    the ``writing`` qrels use ``query_id``/``corpus_id`` while the other four
+    tasks use ``query-id``/``corpus-id``. Normalising the separator keeps both
+    spellings recognised, so ``writing`` no longer falls through to the row
+    parser and fails on ``int("score")``.
+    """
+    return row[0].strip().lower().replace("_", "-") == "query-id"
+
+
 class OBLIQLoader(BaseDataLoader):
     """
     Loads a single OBLIQ-Bench task.
@@ -135,10 +148,19 @@ class OBLIQLoader(BaseDataLoader):
         query_filter = set(self._queries.keys())
         with open(qrels_file) as f:
             reader = csv.reader(f, delimiter="\t")
-            for row in reader:
-                if len(row) < 3 or row[0] == "query-id":
+            for lineno, row in enumerate(reader, start=1):
+                if len(row) < 3:
                     continue
-                qid, did, score = row[0], row[1], int(row[2])
+                if _is_qrels_header(row):
+                    continue
+                try:
+                    score = int(row[2])
+                except ValueError as exc:
+                    raise ValueError(
+                        f"[OBLIQLoader] {meta['qrels_path']} line {lineno}: "
+                        f"expected an integer score in column 3, got {row[2]!r}"
+                    ) from exc
+                qid, did = row[0], row[1]
                 if qid in query_filter and score > 0:
                     self._qrels.setdefault(qid, {})[did] = score
 

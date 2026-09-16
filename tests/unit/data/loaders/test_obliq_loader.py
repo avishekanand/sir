@@ -28,6 +28,17 @@ QUERY_ROWS = [
     {"_id": "q4", "text": "query four (no qrels)"},
 ]
 
+# Header spelling actually used by each task's qrels.tsv in
+# dianetc/OBLIQ-Bench. `writing` is the odd one out — it uses underscores.
+# Verified against the files on the Hub.
+TASK_QRELS_HEADERS = {
+    "congress": ("query-id", "corpus-id", "score"),
+    "math":     ("query-id", "corpus-id", "score"),
+    "writing":  ("query_id", "corpus_id", "score"),
+    "twitter":  ("query-id", "corpus-id", "score"),
+    "wildchat": ("query-id", "corpus-id", "score"),
+}
+
 # (query-id, corpus-id, score) rows, in the on-disk TSV order (header first).
 QRELS_TSV_ROWS = [
     ("query-id", "corpus-id", "score"),
@@ -266,3 +277,78 @@ def test_all_known_tasks_are_accepted(task, qrels_file, excluded_ids_file):
     assert loader.dataset == DATASET_ID
     assert len(queries) == 4
     assert len(corpus) == 6
+
+
+# ---------------------------------------------------------------------------
+# Qrels TSV header handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        ("query-id", "corpus-id", "score"),
+        ("query_id", "corpus_id", "score"),
+        ("Query-ID", "Corpus-ID", "Score"),
+    ],
+    ids=["hyphenated", "underscored", "mixed-case"],
+)
+def test_qrels_header_variants_are_all_skipped(tmp_path, header, excluded_ids_file):
+    """
+    The `writing` task's qrels use `query_id`/`corpus_id` while the other four
+    use `query-id`/`corpus-id`. Both spellings must be recognised as the header
+    row; previously the underscored one fell through to the row parser and
+    raised `ValueError: invalid literal for int() with base 10: 'score'`.
+    """
+    rows = [header] + list(QRELS_TSV_ROWS[1:])
+    qrels_path = _write_qrels_tsv(tmp_path / "qrels.tsv", rows)
+
+    # `writing` is the task whose real qrels use the underscored header.
+    p_ld, p_hf = _patched(qrels_path, excluded_ids_path=excluded_ids_file)
+    with p_ld, p_hf:
+        loader = OBLIQLoader(task="writing")
+        _, _, qrels = loader.load()
+
+    assert qrels == {"q1": {"d1": 1}, "q2": {"d3": 1}, "q3": {"d4": 1}}
+
+
+@pytest.mark.parametrize("task", OBLIQ_TASKS)
+def test_each_task_loads_with_its_real_qrels_header(task, tmp_path, excluded_ids_file):
+    """Every task parses using the header spelling its real qrels file has."""
+    rows = [TASK_QRELS_HEADERS[task]] + list(QRELS_TSV_ROWS[1:])
+    qrels_path = _write_qrels_tsv(tmp_path / f"qrels_{task}.tsv", rows)
+
+    p_ld, p_hf = _patched(qrels_path, excluded_ids_path=excluded_ids_file)
+    with p_ld, p_hf:
+        loader = OBLIQLoader(task=task)
+        _, queries, qrels = loader.load()
+
+    assert len(queries) == 4
+    assert qrels == {"q1": {"d1": 1}, "q2": {"d3": 1}, "q3": {"d4": 1}}
+
+
+def test_qrels_without_header_row_is_parsed(tmp_path):
+    """A headerless qrels file must not lose its first data row."""
+    qrels_path = _write_qrels_tsv(tmp_path / "qrels.tsv", QRELS_TSV_ROWS[1:])
+
+    p_ld, p_hf = _patched(qrels_path)
+    with p_ld, p_hf:
+        loader = OBLIQLoader(task="congress")
+        _, _, qrels = loader.load()
+
+    assert qrels == {"q1": {"d1": 1}, "q2": {"d3": 1}, "q3": {"d4": 1}}
+
+
+def test_non_integer_score_raises_informative_error(tmp_path):
+    """
+    A corrupt score must still fail loudly, but name the file and line rather
+    than surfacing a bare `invalid literal for int()`.
+    """
+    rows = list(QRELS_TSV_ROWS) + [("q2", "d5", "not-a-number")]
+    qrels_path = _write_qrels_tsv(tmp_path / "qrels.tsv", rows)
+
+    p_ld, p_hf = _patched(qrels_path)
+    with p_ld, p_hf:
+        loader = OBLIQLoader(task="congress")
+        with pytest.raises(ValueError, match="expected an integer score"):
+            loader.load()
