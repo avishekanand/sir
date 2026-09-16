@@ -1,6 +1,6 @@
 # RAGtune Documentation Manifest
 
-_Last updated: 2026-04-22_
+_Last updated: 2026-09-16_
 
 This file is the authoritative record of documentation coverage. Update it when you add a feature or write a doc. Run `python scripts/check_docs.py` to get a coverage summary.
 
@@ -104,6 +104,16 @@ Status legend: `✅ done` | `⚠️ partial` | `❌ missing`
 
 ---
 
+## Benchmarking & Tuning
+
+| Component | Source | Doc file | Example | Status |
+|---|---|---|---|---|
+| BEIR benchmark sweep | `examples/beir_full_benchmark.py` | `docs/benchmarking-and-prompt-optimization.md` | `examples/beir_full_benchmark.py --preset smoke` | ✅ done |
+| Prompt optimizer | `examples/prompt_optimizer.py` | `docs/benchmarking-and-prompt-optimization.md` | `examples/prompt_optimizer.py --dry-run` | ✅ done |
+| ConfigLoader.set_prompt | `src/ragtune/utils/config.py` | `docs/benchmarking-and-prompt-optimization.md` §3 | — | ✅ done |
+
+---
+
 ## Summary
 
 Run `python scripts/check_docs.py` for live counts.
@@ -119,4 +129,5 @@ Run `python scripts/check_docs.py` for live counts.
 | Adapters | 0 | 2 | 0 | 2 |
 | CLI | 5 | 0 | 0 | 5 |
 | Datasets | 6 | 0 | 0 | 6 |
-| **Total** | **17** | **9** | **7** | **33** |
+| Benchmarking & Tuning | 3 | 0 | 0 | 3 |
+| **Total** | **20** | **9** | **7** | **36** |
