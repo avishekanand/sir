@@ -108,7 +108,13 @@ def build_retriever(
     Builds a FAISS index from the corpus, ensuring all gold docs are included.
     Returns the RAGtune-compatible retriever and the raw vectorstore.
     """
-    # Collect gold doc IDs so they are never dropped by the corpus cap
+    # Collect gold doc IDs so they are never dropped by the corpus cap.
+    # TODO(benchmark-complete): remove this unconditional gold-doc injection
+    # when running the full corpus. It is only here so that a MAX_CORPUS_DOCS
+    # sample still contains relevant documents — without it the metrics
+    # collapse to noise. It inflates absolute scores uniformly across
+    # scenarios, so scenario *comparisons* stay valid, but the absolute
+    # numbers are not publishable.
     gold_ids: set = set()
     for doc_scores in qrels_query.values():
         gold_ids.update(doc_scores.keys())
@@ -141,11 +147,47 @@ def build_retriever(
 
 # --- Scenario Execution ---
 
+def pad_to_depth(
+    ranked_ids: List[str],
+    retrieval_order: List[str],
+    depth: int,
+) -> Dict[str, float]:
+    """
+    Pad a ranked list with the un-reranked retrieval tail, out to ``depth``.
+
+    Every scenario must be evaluated over the same number of documents.
+    Otherwise Recall@50 compares the no-rerank baseline (50 docs) against the
+    rerank scenarios (only as many docs as the budget allowed), the
+    denominators differ, and reranking looks harmful when it is not.
+
+    ``GreedyAssembler(max_docs=CANDIDATES_TOP_K)`` already returns the
+    reranked head followed by the retrieval tail, so this is normally a no-op.
+    It is kept as an explicit guarantee because the assembler also gates each
+    document on the token budget, so a tight token ceiling can silently
+    shorten the tail and quietly reintroduce the mismatch.
+
+    Padded documents keep retrieval order and always rank below every reranked
+    document, so metrics measured no deeper than the budget (alpha-nDCG@10 for
+    a >=10-doc budget) are unaffected.
+    """
+    ordered = list(ranked_ids)
+    seen = set(ordered)
+    for doc_id in retrieval_order:
+        if len(ordered) >= depth:
+            break
+        if doc_id not in seen:
+            ordered.append(doc_id)
+            seen.add(doc_id)
+    return {doc_id: 1.0 / (rank + 1) for rank, doc_id in enumerate(ordered)}
+
+
 def run_controller_scenario(
     name: str,
     controller: RAGtuneController,
     queries: Dict[str, str],
     qrels: Dict[str, Dict[str, int]],
+    retrieval_order: Dict[str, List[str]],
+    depth: int = CANDIDATES_TOP_K,
 ) -> Tuple[Dict[str, Dict[str, float]], float, float]:
     """
     Runs a controller over all queries.
@@ -156,6 +198,7 @@ def run_controller_scenario(
     results: Dict[str, Dict[str, float]] = {}
     latencies: List[float] = []
     docs_reranked: List[float] = []
+    padded_queries = 0
 
     for qid, qtext in queries.items():
         _reranker.set_gold(qid, qrels)
@@ -163,10 +206,18 @@ def run_controller_scenario(
         output = controller.run(qtext)
         latencies.append((time.time() - t0) * 1000)
         docs_reranked.append(output.final_budget_state.get("rerank_docs", 0))
-        results[qid] = {
-            doc.id: 1.0 / (rank + 1)
-            for rank, doc in enumerate(output.documents)
-        }
+
+        returned_ids = [doc.id for doc in output.documents]
+        if len(returned_ids) < depth:
+            padded_queries += 1
+        results[qid] = pad_to_depth(returned_ids, retrieval_order.get(qid, []), depth)
+
+    if padded_queries:
+        print_step(
+            f"    note: {padded_queries}/{len(queries)} queries returned fewer than "
+            f"{depth} docs and were padded with the retrieval tail — check whether "
+            f"the token budget is truncating assembly."
+        )
 
     return results, float(pd.Series(docs_reranked).mean()), float(pd.Series(latencies).mean())
 
@@ -175,20 +226,54 @@ def run_faiss_baseline(
     vectorstore: FAISS,
     queries: Dict[str, str],
     top_k: int,
-) -> Dict[str, Dict[str, float]]:
-    """Pure retrieval baseline — no reranking, raw FAISS cosine scores."""
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, List[str]]]:
+    """
+    Pure retrieval baseline — no reranking, raw FAISS cosine scores.
+
+    Also returns the retrieval order per query ({query_id: [doc_id, ...]}),
+    which the controller scenarios use to pad out to the same evaluation
+    depth. See ``pad_to_depth``.
+    """
     print_step("  Running [No-Rerank Baseline (FAISS)]...")
     results: Dict[str, Dict[str, float]] = {}
+    order: Dict[str, List[str]] = {}
     for qid, qtext in queries.items():
         pairs = vectorstore.similarity_search_with_score(qtext, k=top_k)
+        order[qid] = [doc.metadata["id"] for doc, _ in pairs]
         results[qid] = {
-            doc.metadata["id"]: 1.0 / (rank + 1)
-            for rank, (doc, _) in enumerate(pairs)
+            doc_id: 1.0 / (rank + 1)
+            for rank, doc_id in enumerate(order[qid])
         }
-    return results
+    return results, order
 
 
 # --- Evaluation ---
+
+# Exact metric keys emitted by freshstack.retrieval.metrics. Note the
+# hyphen-and-mixed-case spelling of alpha-nDCG — it is not "alpha_nDCG".
+ALPHA_NDCG_KEY = "alpha-nDCG@10"
+COVERAGE_KEY = "Coverage@20"
+RECALL_KEY = "Recall@50"
+
+
+def _metric(d: Dict[str, float], key: str) -> float:
+    """
+    Look a metric up by exact key.
+
+    The previous helper matched keys by substring and, on no match, fell back
+    to ``next(iter(d.values()))`` — silently returning a wrong-but-plausible
+    number. That fallback is reachable today: ``alpha_ndcg`` has no ``@50``
+    entry at all, because pyndeval caps k at 20 and freshstack filters
+    ``k_values`` accordingly. Substring matching is also order-dependent
+    (``"10" in "Coverage@100"``). Missing keys must fail loudly instead.
+    """
+    try:
+        return float(d[key])
+    except KeyError:
+        raise KeyError(
+            f"{key!r} missing from freshstack metric dict; available keys: {sorted(d)}"
+        ) from None
+
 
 def evaluate(
     results: Dict[str, Dict[str, float]],
@@ -210,15 +295,11 @@ def evaluate(
         results=results,
     )
 
-    def _extract(d, key):
-        if isinstance(d, dict):
-            for k, v in d.items():
-                if str(key) in str(k):
-                    return float(v)
-            return float(next(iter(d.values())))
-        return float(d)
-
-    return _extract(alpha_ndcg, 10), _extract(coverage, 20), _extract(recall, 50)
+    return (
+        _metric(alpha_ndcg, ALPHA_NDCG_KEY),
+        _metric(coverage, COVERAGE_KEY),
+        _metric(recall, RECALL_KEY),
+    )
 
 
 # --- Main ---
@@ -226,6 +307,9 @@ def evaluate(
 def build_scenarios(retriever: LangChainRetriever) -> List[Tuple[str, RAGtuneController]]:
     # rerank_docs is the sole study variable. tokens and latency_ms are parked well
     # above what any scenario will reach so they don't silently truncate results.
+    # max_docs=CANDIDATES_TOP_K keeps every scenario's output at the same
+    # evaluation depth, which is what makes Recall@50 comparable against the
+    # no-rerank baseline; do not drop it back to the GreedyAssembler default.
     assembler = GreedyAssembler(max_docs=CANDIDATES_TOP_K)
     return [
         (
@@ -287,7 +371,9 @@ def main():
         )
 
         # No-rerank baseline (pure FAISS)
-        faiss_results = run_faiss_baseline(vectorstore, queries, CANDIDATES_TOP_K)
+        faiss_results, faiss_order = run_faiss_baseline(
+            vectorstore, queries, CANDIDATES_TOP_K
+        )
         ndcg, cov, rec = evaluate(faiss_results, qrels_nuggets, qrels_query, query_to_nuggets)
         all_rows.append({
             "domain": topic,
@@ -302,7 +388,7 @@ def main():
         # Controller scenarios
         for name, controller in build_scenarios(retriever):
             ctrl_results, avg_reranked, avg_latency = run_controller_scenario(
-                name, controller, queries, qrels_query
+                name, controller, queries, qrels_query, faiss_order
             )
             ndcg, cov, rec = evaluate(
                 ctrl_results, qrels_nuggets, qrels_query, query_to_nuggets
