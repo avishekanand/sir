@@ -1,5 +1,6 @@
 from .BaseDataLoader import BaseDataLoader
 from .BRIGHTLoader import BRIGHTLoader, BRIGHTMultiTaskLoader
+from .CoIRLoader import CoIRLoader
 from .CRUMBLoader import CRUMBLoader, CRUMB_TASKS
 from .FreshStackLoader import FreshStackLoader
 from .HuggingFaceLoader import HuggingFaceLoader
@@ -14,6 +15,7 @@ __all__ = [
     "BaseDataLoader",
     "BRIGHTLoader",
     "BRIGHTMultiTaskLoader",
+    "CoIRLoader",
     "CRUMBLoader",
     "CRUMB_TASKS",
     "FreshStackLoader",

@@ -12,6 +12,7 @@ class Benchmark:
     TOOLRET = "toolret"
     SKILLRET = "skillret"
     SRA_BENCH = "sra_bench"
+    COIR = "coir"
 
 
 class Dataset:
@@ -61,6 +62,11 @@ class Dataset:
     SRA_CHAMP = "champ"
     SRA_LOGICBENCH = "logicbench"
     SRA_MEDCALCBENCH = "medcalcbench"
+    STACKOVERFLOW_QA = "stackoverflow-qa"
+    CODEFEEDBACK_ST = "codefeedback-st"
+    APPS = "apps"
+    COSQA = "cosqa"
+    SYNTHETIC_TEXT2SQL = "synthetic-text2sql"
 
 
 BRIGHT_TASKS = [
@@ -110,6 +116,13 @@ SRA_BENCH_SUBSETS = [
     Dataset.SRA_LOGICBENCH,
     Dataset.SRA_MEDCALCBENCH,
 ]
+COIR_DATASETS = [
+    Dataset.STACKOVERFLOW_QA,
+    Dataset.CODEFEEDBACK_ST,
+    Dataset.APPS,
+    Dataset.COSQA,
+    Dataset.SYNTHETIC_TEXT2SQL,
+]
 
 
 class Separators:
@@ -137,3 +150,10 @@ class HFDatasets:
     TOOLRET_TOOLS = "mangopy/ToolRet-Tools"
     SKILLRET_REPO = "ThakiCloud/SKILLRET"
     SRA_BENCH_REPO = "WeihangSu/SRA-Bench"
+    COIR_ORG = "CoIR-Retrieval"
+    # CoIR stores corpus and queries in a config *and* split of the same name;
+    # qrels live in the default config (config=None).
+    COIR_CORPUS_CONFIG = "corpus"
+    COIR_CORPUS_SPLIT = "corpus"
+    COIR_QUERIES_CONFIG = "queries"
+    COIR_QUERIES_SPLIT = "queries"
