@@ -15,7 +15,8 @@ class RAGtuneController:
         scheduler: BaseScheduler,
         estimator: BaseEstimator,
         budget: Optional[CostBudget] = None,
-        feedback: Optional[BaseFeedback] = None
+        feedback: Optional[BaseFeedback] = None,
+        initial_top_k: Optional[int] = None,
     ):
         self.retriever = retriever
         self.reformulator = reformulator
@@ -25,6 +26,7 @@ class RAGtuneController:
         self.estimator = estimator
         self.budget = budget or CostBudget()
         self.feedback = feedback
+        self.initial_top_k = initial_top_k
         self._reformulation_cache: Dict[str, List[str]] = {}
 
     def run(self, query: str, override_budget: Optional[CostBudget] = None) -> ControllerOutput:
@@ -34,7 +36,7 @@ class RAGtuneController:
         context = RAGtuneContext(query=query, tracker=tracker)
         
         # 1. Original Retrieval
-        d_orig = config.get("retrieval.original_query_depth", 10)
+        d_orig = self.initial_top_k if self.initial_top_k is not None else config.get("retrieval.original_query_depth", 10)
         d_ref = config.get("retrieval.depth_per_reformulation", 5)
         max_pool = config.get("retrieval.max_pool_size", 50)
         

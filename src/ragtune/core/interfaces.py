@@ -48,15 +48,10 @@ class BaseScheduler(ABC):
     ) -> Optional[BatchProposal]:
         pass
 
-class BaseIndexer(ABC):
-    """Base interface for indexing frameworks."""
-    @abstractmethod
-    def build(self, collection_path: str, format: str, fields: Dict[str, str], **params) -> bool:
-        pass
-
-    @abstractmethod
-    def exists(self, index_path: str) -> bool:
-        pass
+# BaseIndexer is defined in ragtune.indexing.base (single source of truth).
+# Re-exported here so existing `from ragtune.core.interfaces import BaseIndexer`
+# imports continue to work without changes.
+from ragtune.indexing.base import BaseIndexer  # noqa: F401
 
 class BaseFeedback(ABC):
     """Base interface for feedback/stop policies."""

@@ -24,6 +24,10 @@ run-freshstack:
 	@echo "--- Running FreshStack Benchmark ---"
 	@$(PYTHON_CLEAN) scripts/benchmark_freshstack.py
 
+run-crumb:
+	@echo "--- Running CRUMB Passage Retrieval Benchmark ---"
+	@$(PYTHON_CLEAN) scripts/benchmark_crumb.py
+
 run-langchain:
 	@echo "--- Running LangChain Demo ---"
 	@$(PYTHON_CLEAN) examples/demo_langchain_retriever.py
