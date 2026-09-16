@@ -4,6 +4,7 @@ from .CRUMBLoader import CRUMBLoader, CRUMB_TASKS
 from .FreshStackLoader import FreshStackLoader
 from .HuggingFaceLoader import HuggingFaceLoader
 from .IRDatasetsLoader import IRDatasetsLoader
+from .OBLIQLoader import OBLIQLoader, OBLIQ_TASKS
 from .DataLoaderFactory import DataLoaderFactory
 from .RetrieverDataset import RetrieverDataset
 from .ToolRetLoader import ToolRetLoader
@@ -19,6 +20,8 @@ __all__ = [
     "FreshStackLoader",
     "HuggingFaceLoader",
     "IRDatasetsLoader",
+    "OBLIQLoader",
+    "OBLIQ_TASKS",
     "DataLoaderFactory",
     "RetrieverDataset",
     "ToolRetLoader",

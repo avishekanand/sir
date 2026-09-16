@@ -20,6 +20,14 @@ run-benchmarks:
 	@echo "--- Running RAGtune Unified Benchmark Suite ---"
 	@$(PYTHON_CLEAN) scripts/benchmark_suite.py
 
+run-freshstack:
+	@echo "--- Running FreshStack Benchmark ---"
+	@$(PYTHON_CLEAN) scripts/benchmark_freshstack.py
+
+run-obliq:
+	@echo "--- Running OBLIQ-Bench Benchmark ---"
+	@$(PYTHON_CLEAN) scripts/benchmark_obliq.py
+
 run-crumb:
 	@echo "--- Running CRUMB Passage Retrieval Benchmark ---"
 	@$(PYTHON_CLEAN) scripts/benchmark_crumb.py
