@@ -5,11 +5,19 @@ Unit tests for CoIRLoader (src/ragtune/data/loaders/CoIRLoader.py).
 HuggingFace Hub, per the project's unit-test conventions.
 """
 
+import importlib
+
 import pytest
 from unittest.mock import patch
 
 from ragtune.data.loaders.CoIRLoader import CoIRLoader, COIR_DATASETS
 from ragtune.data.datastructures.query import Query
+
+# `loaders/__init__.py` re-exports the CoIRLoader *class* under the package
+# attribute `CoIRLoader`, shadowing the same-named submodule. A dotted patch
+# target ending in `...loaders.CoIRLoader` therefore resolves to the class and
+# raises AttributeError, so patch against the module object instead.
+coir_module = importlib.import_module("ragtune.data.loaders.CoIRLoader")
 
 
 QRELS_ROWS = [
@@ -70,7 +78,7 @@ def test_dataset_id_and_defaults():
 
 
 def test_load_filters_zero_score_qrels_and_orphan_queries():
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=make_fake_fetch()):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=make_fake_fetch()):
         loader = CoIRLoader(dataset="cosqa")
         corpus, queries, qrels = loader.load()
 
@@ -89,7 +97,7 @@ def test_load_filters_zero_score_qrels_and_orphan_queries():
 
 
 def test_get_query_objects_returns_query_instances():
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=make_fake_fetch()):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=make_fake_fetch()):
         loader = CoIRLoader(dataset="cosqa")
         query_objs = loader.get_query_objects()
 
@@ -98,7 +106,7 @@ def test_get_query_objects_returns_query_instances():
 
 
 def test_max_queries_caps_and_reconciles_qrels():
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=make_fake_fetch()):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=make_fake_fetch()):
         loader = CoIRLoader(dataset="cosqa", max_queries=2)
         corpus, queries, qrels = loader.load()
 
@@ -107,7 +115,7 @@ def test_max_queries_caps_and_reconciles_qrels():
 
 
 def test_max_corpus_docs_always_keeps_gold_documents():
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=make_fake_fetch()):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=make_fake_fetch()):
         loader = CoIRLoader(dataset="cosqa", max_corpus_docs=1)
         corpus, queries, qrels = loader.load()
 
@@ -120,7 +128,7 @@ def test_max_corpus_docs_always_keeps_gold_documents():
 
 def test_qrels_split_falls_back_to_train():
     fake_fetch = make_fake_fetch(fail_splits={(None, "test")})
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=fake_fetch):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=fake_fetch):
         loader = CoIRLoader(dataset="cosqa", split="test")
         _, queries, qrels = loader.load()
 
@@ -129,7 +137,7 @@ def test_qrels_split_falls_back_to_train():
 
 def test_qrels_missing_entirely_raises_runtime_error():
     fake_fetch = make_fake_fetch(fail_splits={(None, "test"), (None, "train")})
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=fake_fetch):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=fake_fetch):
         loader = CoIRLoader(dataset="cosqa")
         with pytest.raises(RuntimeError):
             loader.load()
@@ -137,7 +145,7 @@ def test_qrels_missing_entirely_raises_runtime_error():
 
 def test_queries_split_falls_back_to_test_split():
     fake_fetch = make_fake_fetch(fail_splits={("queries", "queries")})
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=fake_fetch):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=fake_fetch):
         loader = CoIRLoader(dataset="cosqa")
         _, queries, _ = loader.load()
 
@@ -145,8 +153,8 @@ def test_queries_split_falls_back_to_test_split():
 
 
 def test_lazy_loading_only_fetches_once():
-    with patch(
-        "ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=make_fake_fetch()
+    with patch.object(
+        coir_module, "fetch_hf_split", side_effect=make_fake_fetch()
     ) as mock_fetch:
         loader = CoIRLoader(dataset="cosqa")
         assert mock_fetch.call_count == 0
@@ -162,7 +170,7 @@ def test_lazy_loading_only_fetches_once():
 
 @pytest.mark.parametrize("dataset_name", COIR_DATASETS)
 def test_all_known_coir_datasets_are_accepted(dataset_name):
-    with patch("ragtune.data.loaders.CoIRLoader.fetch_hf_split", side_effect=make_fake_fetch()):
+    with patch.object(coir_module, "fetch_hf_split", side_effect=make_fake_fetch()):
         loader = CoIRLoader(dataset=dataset_name)
         assert loader.dataset == f"CoIR-Retrieval/{dataset_name}"
         assert len(loader) == 3
