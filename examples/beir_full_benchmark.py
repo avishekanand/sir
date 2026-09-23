@@ -828,7 +828,7 @@ def run_bayes(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) ->
         n_parallel_workers=1,  # the global config singleton is not thread-safe
         max_mean_rerank_docs=args.max_cost,
         max_trial_seconds=args.max_trial_seconds,
-        pareto_warmup_trials=max(5, args.budget // 8),
+        pareto_warmup_trials=max(10, args.budget // 3),
         output_dir=str(cfg_dir),
         search_space_overrides=overrides,
     )
@@ -933,7 +933,7 @@ def run_random(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -
     from optuna.samplers import RandomSampler
 
     from ragtune.tuning.evaluator import TrialEvaluator
-    from ragtune.tuning.pruners import CostPruner, RuntimePruner
+    from ragtune.tuning.pruners import CostPruner, ParetoPruner, RuntimePruner
     from ragtune.tuning.search_space import RAGtuneSearchSpace
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -951,6 +951,11 @@ def run_random(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -
         pruners=[
             CostPruner(max_mean_rerank_docs=args.max_cost, warmup_steps=3),
             RuntimePruner(max_trial_seconds=args.max_trial_seconds, warmup_steps=3),
+            ParetoPruner(
+                study=study,
+                warmup_trials=max(10, args.budget // 3),
+                zscore=1.645,
+            ),
         ],
     )
 

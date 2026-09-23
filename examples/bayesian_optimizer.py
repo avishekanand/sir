@@ -224,7 +224,7 @@ def run_seed(seed: int, retriever, eval_ds, args, out_dir: Path) -> SeedRun:
     ]
     if args.pareto_pruning:
         pruners.append(ParetoPruner(
-            study=study, warmup_trials=max(5, args.iterations // 8), zscore=1.645,
+            study=study, warmup_trials=max(10, args.iterations // 3), zscore=1.645,
         ))
     evaluator = TrialEvaluator(dataset=eval_ds, n_eval_queries=args.n_queries,
                                pruners=pruners)
