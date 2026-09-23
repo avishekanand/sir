@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DatasetConfig(BaseModel):
@@ -35,6 +35,11 @@ class TuningStudyConfig(BaseModel):
 
     # Optional overrides for search space (e.g. restrict reranker_types to a subset)
     search_space_overrides: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def clamp_startup_trials(self) -> "TuningStudyConfig":
+        self.n_startup_trials = min(self.n_startup_trials, self.n_trials // 4)
+        return self
 
     @classmethod
     def from_yaml(cls, path: str) -> TuningStudyConfig:

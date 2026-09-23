@@ -95,8 +95,7 @@ class RuntimePruner(TuningPruner):
     def should_prune(self) -> bool:
         if self._step < self.warmup_steps or self._step == 0:
             return False
-        projected_s = (self._elapsed_ms / 1000.0) * (self._n_total / self._step)
-        return projected_s > self.max_trial_seconds
+        return (self._elapsed_ms / 1000.0) > self.max_trial_seconds
 
 
 class ParetoPruner(TuningPruner):

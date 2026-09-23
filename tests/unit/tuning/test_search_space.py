@@ -7,14 +7,15 @@ from ragtune.tuning.search_space import RAGtuneSearchSpace
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _make_trial(space: RAGtuneSearchSpace) -> FixedTrial:
-    """Build a FixedTrial that satisfies every suggest_* call in sample()."""
-    return FixedTrial({
+def _all_params(space: RAGtuneSearchSpace) -> dict:
+    """Full param dict covering every key — use to build FixedTrials that
+    override specific parent choices without omitting conditional sub-params."""
+    return {
         # Discrete component selection
-        "reranker_type": space.reranker_types[0],
+        "reranker_type": space.reranker_types[0],   # "noop"
         "reformulator_type": "identity",
         "estimator_type": "baseline",
-        "scheduler_type": space.scheduler_types[0],
+        "scheduler_type": "active-learning",
         "feedback_type": "none",
         # Always-active numerical
         "original_query_depth": 10,
@@ -25,9 +26,9 @@ def _make_trial(space: RAGtuneSearchSpace) -> FixedTrial:
         "budget_rerank_docs": 30,
         "budget_reformulations": 1,
         "scheduler_batch_size": 5,
+        # Conditional — only suggested when parent is active
         "gd_llm_limit": 3,
         "gd_ce_limit": 10,
-        # Conditional (sampled unconditionally)
         "ce_model": space.ce_models[0],
         "monot5_model": space.monot5_models[0],
         "monot5_batch_size": "16",
@@ -36,7 +37,12 @@ def _make_trial(space: RAGtuneSearchSpace) -> FixedTrial:
         "similarity_model": space.similarity_models[0],
         "min_reranked_for_regression": 3,
         "budget_stop_token_threshold": 0.9,
-    })
+    }
+
+
+def _make_trial(space: RAGtuneSearchSpace) -> FixedTrial:
+    """Build a FixedTrial for the default inactive path (noop/identity/baseline/active-learning/none)."""
+    return FixedTrial(_all_params(space))
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -53,25 +59,71 @@ class TestSearchSpaceCardinality:
 
 
 class TestSampleReturnsAllKeys:
-    EXPECTED_KEYS = {
+    ALWAYS_PRESENT = {
         "reranker_type", "reformulator_type", "estimator_type",
         "scheduler_type", "feedback_type",
         "original_query_depth", "depth_per_reformulation", "max_pool_size",
         "near_duplicate_threshold", "assembler_max_docs",
         "budget_rerank_docs", "budget_reformulations",
-        "scheduler_batch_size", "gd_llm_limit", "gd_ce_limit",
-        "ce_model", "monot5_model", "monot5_batch_size",
-        "reformulator_model", "reformulator_n_variants",
-        "similarity_model", "min_reranked_for_regression",
-        "budget_stop_token_threshold",
+        "scheduler_batch_size",
     }
 
-    def test_all_keys_present(self):
+    def test_always_active_keys_present(self):
         ss = RAGtuneSearchSpace()
-        trial = _make_trial(ss)
+        params = ss.sample(_make_trial(ss))
+        assert self.ALWAYS_PRESENT <= set(params.keys())
+
+    def test_noop_reranker_has_no_model_keys(self):
+        ss = RAGtuneSearchSpace()
+        params = ss.sample(_make_trial(ss))  # reranker_type="noop"
+        assert "ce_model" not in params
+        assert "monot5_model" not in params
+        assert "monot5_batch_size" not in params
+
+    def test_cross_encoder_includes_ce_model(self):
+        ss = RAGtuneSearchSpace()
+        trial = FixedTrial({**_all_params(ss), "reranker_type": "cross-encoder"})
         params = ss.sample(trial)
-        missing = self.EXPECTED_KEYS - set(params.keys())
-        assert not missing, f"Missing keys: {missing}"
+        assert "ce_model" in params
+        assert "monot5_model" not in params
+
+    def test_monot5_includes_model_and_batch(self):
+        ss = RAGtuneSearchSpace()
+        trial = FixedTrial({**_all_params(ss), "reranker_type": "monot5"})
+        params = ss.sample(trial)
+        assert "monot5_model" in params
+        assert "monot5_batch_size" in params
+        assert "ce_model" not in params
+
+    def test_graceful_degradation_includes_gd_limits(self):
+        ss = RAGtuneSearchSpace()
+        trial = FixedTrial({**_all_params(ss), "scheduler_type": "graceful-degradation"})
+        params = ss.sample(trial)
+        assert "gd_llm_limit" in params
+        assert "gd_ce_limit" in params
+
+    def test_active_learning_has_no_gd_limits(self):
+        ss = RAGtuneSearchSpace()
+        params = ss.sample(_make_trial(ss))  # scheduler_type="active-learning"
+        assert "gd_llm_limit" not in params
+        assert "gd_ce_limit" not in params
+
+    def test_similarity_estimator_includes_model(self):
+        ss = RAGtuneSearchSpace()
+        trial = FixedTrial({**_all_params(ss), "estimator_type": "similarity"})
+        params = ss.sample(trial)
+        assert "similarity_model" in params
+
+    def test_budget_stop_feedback_includes_threshold(self):
+        ss = RAGtuneSearchSpace()
+        trial = FixedTrial({**_all_params(ss), "feedback_type": "budget-stop"})
+        params = ss.sample(trial)
+        assert "budget_stop_token_threshold" in params
+
+    def test_none_feedback_has_no_threshold(self):
+        ss = RAGtuneSearchSpace()
+        params = ss.sample(_make_trial(ss))  # feedback_type="none"
+        assert "budget_stop_token_threshold" not in params
 
 
 class TestRetrievalOverrides:
@@ -176,9 +228,8 @@ class TestBuildController:
             scheduler_types=["graceful-degradation"],
             feedback_types=["none"],
         )
-        trial = _make_trial(ss)
+        trial = FixedTrial({**_all_params(ss), "scheduler_type": "graceful-degradation"})
         params = ss.sample(trial)
-        params["scheduler_type"] = "graceful-degradation"
         params["gd_llm_limit"] = 7
         params["gd_ce_limit"] = 15
 
