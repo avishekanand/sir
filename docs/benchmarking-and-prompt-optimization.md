@@ -318,11 +318,12 @@ Per cell, 50 trials × 50 queries = 2,500 query-evaluations:
 | + MonoT5-base | ~1–3 h (*extrapolated*) |
 
 **The pruner interacts with this.** `--max-trial-seconds` defaults to 600, and
-`RuntimePruner` projects total trial time after 3 queries. On CPU a cross-encoder
-trial projects 50 × 17 s = 850 s > 600, so it is pruned in warmup — the run
-finishes fast and the search collapses onto `noop`, producing a meaningless
-Pareto front. On CPU either raise it past 1200 or drop the cross-encoder. The
-GPU presets set 1800.
+`RuntimePruner` aborts a trial when its **actual** cumulative wall time exceeds
+that limit (checked after every query, after a 3-query warmup). On CPU a
+cross-encoder trial spends ~17 s/query, so it hits a 600 s limit after ~35
+queries — the trial is cut short but the queries completed still contribute signal.
+On CPU either raise the limit past 850 or drop the cross-encoder. The GPU presets
+set 1800.
 
 **398 ms/doc for a 22M-param model on 40 cores is suspiciously slow.** The likely
 cause is the scheduler dispatching tiny batches — trials sampled
@@ -343,12 +344,27 @@ python examples/beir_full_benchmark.py --stages baseline \
 `--list-knobs` prints all of these from the live `RAGtuneSearchSpace`.
 
 **Swept by the tuner** — reranker / reformulator / estimator / scheduler /
-feedback type; `ce_model`, `monot5_model`, `monot5_batch_size`,
-`similarity_model`, `reformulator_model`; `original_query_depth`,
-`depth_per_reformulation`, `max_pool_size`, `near_duplicate_threshold`,
-`scheduler_batch_size`, `gd_llm_limit`, `gd_ce_limit`, `assembler_max_docs`,
-`budget_rerank_docs`, `budget_reformulations`, `reformulator_n_variants`,
-`min_reranked_for_regression`, `budget_stop_token_threshold`.
+feedback type; `original_query_depth`, `depth_per_reformulation`, `max_pool_size`,
+`near_duplicate_threshold`, `scheduler_batch_size`, `assembler_max_docs`,
+`budget_rerank_docs`, `budget_reformulations`.
+
+Sub-parameters are sampled **conditionally** — only when their parent component
+is active — so TPE's joint model sees only causally meaningful correlations:
+
+| Sub-parameter | Active when |
+|---|---|
+| `ce_model` | `reranker_type = cross-encoder` |
+| `monot5_model`, `monot5_batch_size` | `reranker_type = monot5` |
+| `gd_llm_limit`, `gd_ce_limit` | `scheduler_type = graceful-degradation` |
+| `reformulator_model` | `reformulator_type ∈ {llm_rewrite, reformir}` |
+| `reformulator_n_variants` | `reformulator_type = reformir` |
+| `similarity_model` | `estimator_type = similarity` |
+| `min_reranked_for_regression` | `estimator_type = reformir` |
+| `budget_stop_token_threshold` | `feedback_type = budget-stop` |
+
+With `--space restricted` (the default), `reformulator_types` is locked to
+`identity` and `estimator_types` excludes `reformir`, so the reformulator and
+regression sub-params are never sampled at all.
 
 **Fixed per run, exposed as flags** — Terrier weighting model, BM25 k1/b,
 retrieval depth, dense encoder and search backend, hybrid fusion components.
@@ -589,8 +605,14 @@ prompt_opt_results/
 ## 5. Reading the results
 
 - **`vs baseline` can be negative and that's not a bug.** At small budgets most
-  trials are random startup draws (`n_startup_trials = max(5, budget//8)`), so
-  the tuner can legitimately finish below a well-chosen fixed config.
+  trials are random startup draws (`n_startup_trials = max(5, budget//8)`,
+  capped at `budget//4` by `TuningStudyConfig`), so the tuner can legitimately
+  finish below a well-chosen fixed config.
+- **TPE and random use identical pruner sets.** Both arms run `CostPruner`,
+  `RuntimePruner`, and `ParetoPruner` with the same thresholds, so win/loss
+  comparisons between them reflect sampler quality rather than pruning
+  asymmetry. `ParetoPruner` warmup is `max(10, budget//3)` — it doesn't fire
+  until the Pareto front has enough completed trials to be trustworthy.
 - **Differences under ~0.02 NDCG are noise** at 50 queries. The report prints a
   warning when run on a single seed. Use `--seeds 42,43,44` and read the ± column.
 - **Hypervolume** is the dominated area under the Pareto front (maximize NDCG,
