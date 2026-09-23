@@ -80,8 +80,8 @@ class RAGtuneSearchSpace(BaseModel):
     def sample(self, trial: Any) -> Dict[str, Any]:
         """
         Draw one configuration from the search space using Optuna's suggest API.
-        All parameters are sampled unconditionally; inactive ones are ignored in
-        to_pipeline_config().
+        Sub-parameters are only sampled when their parent component is active,
+        so TPE's joint model sees only correlations that are causally meaningful.
         """
         params: Dict[str, Any] = {}
 
@@ -119,44 +119,52 @@ class RAGtuneSearchSpace(BaseModel):
             "budget_reformulations", *self.budget_reformulations_range
         )
 
-        # Scheduler sub-params
+        # Scheduler sub-params (batch_size is always relevant; gd_* only for graceful-degradation)
         params["scheduler_batch_size"] = trial.suggest_int(
             "scheduler_batch_size", *self.scheduler_batch_size_range, log=True
         )
-        params["gd_llm_limit"] = trial.suggest_int(
-            "gd_llm_limit", *self.gd_llm_limit_range
-        )
-        params["gd_ce_limit"] = trial.suggest_int(
-            "gd_ce_limit", *self.gd_ce_limit_range
-        )
+        if params["scheduler_type"] == "graceful-degradation":
+            params["gd_llm_limit"] = trial.suggest_int(
+                "gd_llm_limit", *self.gd_llm_limit_range
+            )
+            params["gd_ce_limit"] = trial.suggest_int(
+                "gd_ce_limit", *self.gd_ce_limit_range
+            )
 
-        # Reranker sub-params
-        params["ce_model"] = trial.suggest_categorical("ce_model", self.ce_models)
-        params["monot5_model"] = trial.suggest_categorical("monot5_model", self.monot5_models)
-        params["monot5_batch_size"] = trial.suggest_categorical(
-            "monot5_batch_size", [str(b) for b in self.monot5_batch_sizes]
-        )
+        # Reranker sub-params — only sample model/batch when the reranker uses them
+        if params["reranker_type"] == "cross-encoder":
+            params["ce_model"] = trial.suggest_categorical("ce_model", self.ce_models)
+        elif params["reranker_type"] == "monot5":
+            params["monot5_model"] = trial.suggest_categorical("monot5_model", self.monot5_models)
+            params["monot5_batch_size"] = trial.suggest_categorical(
+                "monot5_batch_size", [str(b) for b in self.monot5_batch_sizes]
+            )
 
         # Reformulator sub-params
-        params["reformulator_model"] = trial.suggest_categorical(
-            "reformulator_model", self.reformulator_models
-        )
-        params["reformulator_n_variants"] = trial.suggest_int(
-            "reformulator_n_variants", *self.reformulator_n_variants_range
-        )
+        if params["reformulator_type"] in ("llm_rewrite", "reformir"):
+            params["reformulator_model"] = trial.suggest_categorical(
+                "reformulator_model", self.reformulator_models
+            )
+        if params["reformulator_type"] == "reformir":
+            params["reformulator_n_variants"] = trial.suggest_int(
+                "reformulator_n_variants", *self.reformulator_n_variants_range
+            )
 
         # Estimator sub-params
-        params["similarity_model"] = trial.suggest_categorical(
-            "similarity_model", self.similarity_models
-        )
-        params["min_reranked_for_regression"] = trial.suggest_int(
-            "min_reranked_for_regression", *self.min_reranked_for_regression_range
-        )
+        if params["estimator_type"] == "similarity":
+            params["similarity_model"] = trial.suggest_categorical(
+                "similarity_model", self.similarity_models
+            )
+        elif params["estimator_type"] == "reformir":
+            params["min_reranked_for_regression"] = trial.suggest_int(
+                "min_reranked_for_regression", *self.min_reranked_for_regression_range
+            )
 
         # Feedback sub-params
-        params["budget_stop_token_threshold"] = trial.suggest_float(
-            "budget_stop_token_threshold", *self.budget_stop_token_threshold_range
-        )
+        if params["feedback_type"] == "budget-stop":
+            params["budget_stop_token_threshold"] = trial.suggest_float(
+                "budget_stop_token_threshold", *self.budget_stop_token_threshold_range
+            )
 
         return params
 
