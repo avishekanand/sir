@@ -35,9 +35,9 @@ class RAGtuneSearchSpace(BaseModel):
     (low, high) tuples passed to Optuna's suggest_int / suggest_float.
 
     Conditional parameters (e.g. ce_model only matters when reranker_type
-    == "cross-encoder") are always sampled — inactive values are silently
-    ignored by to_pipeline_config().  This is the standard Optuna approach
-    with multivariate TPE.
+    == "cross-encoder") are sampled only when their parent is active, so
+    TPE's joint model is not polluted by spurious correlations from dead
+    parameters.
     """
 
     # ── Discrete menus ────────────────────────────────────────────────────────
