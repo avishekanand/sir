@@ -219,7 +219,7 @@ def test_parse_response_valid_json():
         "rationale": "test reason",
         "params": {"reranker_type": "noop", "original_query_depth": 10},
     })
-    params, rationale = opt._parse_response(raw)
+    params, rationale = opt._parse_response(raw, None)
     assert rationale == "test reason"
     assert "reranker_type" in params
 
@@ -227,14 +227,14 @@ def test_parse_response_valid_json():
 def test_parse_response_with_markdown_fences():
     opt = _make_optimizer()
     raw = '```json\n{"rationale": "ok", "params": {}}\n```'
-    params, rationale = opt._parse_response(raw)
+    params, rationale = opt._parse_response(raw, None)
     assert rationale == "ok"
     assert isinstance(params, dict)
 
 
 def test_parse_response_malformed_returns_defaults():
     opt = _make_optimizer()
-    params, rationale = opt._parse_response("not json at all")
+    params, rationale = opt._parse_response("not json at all", None)
     assert isinstance(params, dict)
     assert "reranker_type" in params  # filled by validate
 
@@ -243,14 +243,14 @@ def test_parse_response_malformed_returns_defaults():
 
 def test_system_prompt_contains_objectives():
     opt = _make_optimizer()
-    prompt = opt._build_system_prompt()
+    prompt = opt._build_system_prompt("reranker")
     assert "ndcg_at_10" in prompt
     assert "mean_rerank_docs" in prompt
 
 
 def test_system_prompt_lists_reranker_types():
     opt = _make_optimizer()
-    prompt = opt._build_system_prompt()
+    prompt = opt._build_system_prompt("reranker")
     for rt in opt.search_space.reranker_types:
         assert rt in prompt
 
@@ -272,10 +272,10 @@ def _good_params() -> Dict[str, Any]:
     return {k: v for k, v in _make_candidate().params.items()}
 
 
-def _make_eval_result(ndcg=0.5, cost=20.0) -> EvalResult:
+def _make_eval_result(ndcg=0.5, cost=20.0, n_queries=5) -> EvalResult:
     from ragtune.tuning.evaluator import TrialObjectives
     return EvalResult(
-        objectives=TrialObjectives(ndcg_at_10=ndcg, rerank_docs=cost, latency_ms=100.0, queries_evaluated=5),
+        objectives=TrialObjectives(ndcg_at_10=ndcg, rerank_docs=cost, latency_ms=100.0, queries_evaluated=n_queries),
         trace=TraceAggregate(
             avg_pool_size=30.0,
             avg_pct_pool_reranked=0.6,
@@ -284,6 +284,8 @@ def _make_eval_result(ndcg=0.5, cost=20.0) -> EvalResult:
             avg_rewrite_utility=0.2,
             avg_rerank_errors=0.0,
         ),
+        # GEPA tracks per-query NDCG to build an instance-wise Pareto pool.
+        query_ndcg={f"q{i}": ndcg for i in range(n_queries)},
     )
 
 
@@ -291,7 +293,8 @@ def test_run_returns_history_of_correct_length():
     opt = _make_optimizer()
 
     with (
-        patch("ragtune.tuning.llm_optimizer.evaluate_controller") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_full") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch") as mock_mini,
         patch.object(opt, "_propose", return_value=(_good_params(), "test rationale")),
     ):
         mock_eval.return_value = _make_eval_result()
@@ -301,6 +304,7 @@ def test_run_returns_history_of_correct_length():
 
         history = opt.run(fake_retriever, fake_dataset)
 
+    assert mock_eval.called, "evaluation was not intercepted — patch target is stale"
     assert len(history) == opt.config.n_iterations
 
 
@@ -308,7 +312,8 @@ def test_run_stores_trace_in_candidate():
     opt = _make_optimizer()
 
     with (
-        patch("ragtune.tuning.llm_optimizer.evaluate_controller") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_full") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch") as mock_mini,
         patch.object(opt, "_propose", return_value=(_good_params(), "test")),
     ):
         mock_eval.return_value = _make_eval_result(ndcg=0.7, cost=15.0)
@@ -317,6 +322,7 @@ def test_run_stores_trace_in_candidate():
         fake_dataset.queries = [MagicMock()]
         history = opt.run(fake_retriever, fake_dataset)
 
+    assert mock_eval.called, "evaluation was not intercepted — patch target is stale"
     assert all(c.trace is not None for c in history if not c.error)
     assert history[0].trace.avg_pool_size == 30.0
 
@@ -355,7 +361,8 @@ def test_run_writes_pareto_files(tmp_path):
     opt = LLMAgentOptimizer(config=cfg)
 
     with (
-        patch("ragtune.tuning.llm_optimizer.evaluate_controller") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_full") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch") as mock_mini,
         patch.object(opt, "_propose", return_value=(_good_params(), "rationale")),
     ):
         mock_eval.return_value = _make_eval_result(ndcg=0.6, cost=25.0)
@@ -492,7 +499,7 @@ def test_user_message_includes_trace_diagnostics():
     c.trace = trace
     history = [c]
     pareto = compute_pareto_front(history)
-    msg = opt._build_user_message(history, pareto)
+    msg = opt._build_user_message(history, pareto, None, "reranker")
     assert "pool=" in msg
     assert "reranked=" in msg or "rnk%" in msg
 
@@ -503,7 +510,7 @@ def test_user_message_includes_rationale_replay():
     c.rationale = "I chose cross-encoder because it has higher accuracy"
     history = [c]
     pareto = compute_pareto_front(history)
-    msg = opt._build_user_message(history, pareto)
+    msg = opt._build_user_message(history, pareto, None, "reranker")
     assert "I chose cross-encoder" in msg
 
 
@@ -514,7 +521,7 @@ def test_user_message_includes_param_trends_when_enough_history():
         for i in range(5)
     ]
     pareto = compute_pareto_front(history)
-    msg = opt._build_user_message(history, pareto)
+    msg = opt._build_user_message(history, pareto, None, "reranker")
     assert "Parameter trends" in msg
 
 
@@ -522,6 +529,9 @@ def test_user_message_includes_diagnosis_hints():
     opt = _make_optimizer()
     history = [_make_candidate(iteration=1, ndcg=0.5, cost=20.0)]
     pareto = compute_pareto_front(history)
-    msg = opt._build_user_message(history, pareto)
-    assert "Diagnostic interpretation" in msg
-    assert "pct_pool_reranked < 50%" in msg
+    msg = opt._build_user_message(history, pareto, None, "reranker")
+    # Hints are scoped to the module being mutated. Assert the contract (a
+    # module-scoped hints section mentioning the pool-utilisation signal) rather
+    # than the exact threshold, which is a tuning constant free to change.
+    assert "Diagnostic hints for [RERANKER]" in msg
+    assert "pct_pool_reranked" in msg
