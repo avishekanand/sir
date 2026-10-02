@@ -90,3 +90,23 @@ def fake_assembler():
 @pytest.fixture
 def fake_scheduler():
     return FakeScheduler()
+
+
+class FakeClock:
+    """Stands in for time.perf_counter so CostTracker.measure() latencies are exact."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def advance_ms(self, ms: float):
+        self.now += ms / 1000
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr("ragtune.core.budget.time.perf_counter", clock)
+    return clock
