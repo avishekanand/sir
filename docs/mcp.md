@@ -105,6 +105,18 @@ evaluate_scenarios(dataset_id="dataset-1", max_queries=50, background=True,
                    index_retriever={"index_type": "pyterrier", "index_path": "indexes/toolqa", "dataset_id": "dataset-1"})
 ```
 
+### Budget and cost
+
+| Tool | Purpose |
+|---|---|
+| `estimate_cost(budget_type, config, config_path, context)` | `ragtune budget` for any loader (`vllm`, `token`, `gpu_util`, `carbon`, `embedding`, `reranking`); `suggest`, `thresholds` (alerts) and `log_to` (JSONL history) are optional |
+| `compare_costs(variants, ...)` | sweep GPUs, regions, request rates, models and rank the results |
+| `validate_budget_config` | value errors plus keys `BudgetConfig` would silently ignore (e.g. `embedding_model` outside `extra`) |
+| `budget_reference(table?)` | GPU specs, model profiles, empirical throughput, regional carbon, embedding/reranking/token pricing, defaults, and each loader's inputs |
+| `estimate_hardware` | GPU + CPU power, energy and carbon for a runtime |
+| `estimate_throughput` | peak and achieved throughput, saturation knee, VRAM fit |
+| `cost_history` / `clear_cost_history` | read (entries or summary) or delete a cost-history JSONL |
+
 ## Resources
 
 | URI | Content |

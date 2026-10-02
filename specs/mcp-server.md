@@ -32,7 +32,7 @@ This is the executable specification for the **RAGtune MCP server** (`ragtune.mc
 | Evaluation | `evaluate_run`, `evaluate_pipeline`, `evaluate_scenarios` |
 | Data | `load_dataset`, `list_datasets`, `get_queries`, `get_documents`, `get_qrels`, `export_corpus`, `drop_dataset` |
 | Indexing | `build_index`, `build_index_from_config`, `index_status`, `search_index` |
-| Budget | `estimate_cost`, `compare_costs`, `validate_budget_config`, `budget_reference`, `estimate_hardware`, `estimate_throughput`, `cost_history` |
+| Budget | `estimate_cost`, `compare_costs`, `validate_budget_config`, `budget_reference`, `estimate_hardware`, `estimate_throughput`, `cost_history`, `clear_cost_history` |
 | Jobs | `list_scripts`, `run_script`, `run_tests`, `run_cli`, `job_status`, `list_jobs`, `cancel_job` |
 
 Notable behaviors:
@@ -72,7 +72,7 @@ Notable behaviors:
 | `calculate_budget`, `format_report`, `BudgetLoaderFactory.create` / `list_types` | `estimate_cost`, `budget_reference` |
 | `BudgetConfig.validate` / `to_dict` | `validate_budget_config` |
 | `suggest_optimizations`, `check_alerts` | `estimate_cost(suggest=..., thresholds=...)`, `compare_costs` |
-| `CostHistoryLogger` log / query / summary / clear | `estimate_cost(log_to=...)`, `cost_history` |
+| `CostHistoryLogger` log / query / summary / clear | `estimate_cost(log_to=...)`, `cost_history`, `clear_cost_history` |
 | `hardware.*` (GPU specs, GPU/CPU/system power, energy, carbon) | `estimate_hardware`, `budget_reference` |
 | `throughput.*` (peak/achieved throughput, saturation knee, profiles, VRAM) | `estimate_throughput`, `budget_reference` |
 | Loader pricing tables (embedding, reranking, token, regional carbon) | `budget_reference` |
