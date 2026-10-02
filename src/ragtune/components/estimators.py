@@ -68,15 +68,17 @@ class SimilarityEstimator(BaseEstimator):
         for it in eligible:
             priorities[it.doc_id] = EstimatorOutput(priority=(max(it.sources.values()) if it.sources else 0.0))
         
-        if not winners:
+        # An exhausted "embedding.*" budget falls back to retrieval-score priorities.
+        if not winners or context.tracker.component_exhausted("embedding"):
             return priorities
 
         # Encode eligible and winners
         eligible_texts = [it.content for it in eligible]
         winner_texts = [it.content for it in winners]
         
-        eligible_embs = self.model.encode(eligible_texts, convert_to_numpy=True)
-        winner_embs = self.model.encode(winner_texts, convert_to_numpy=True)
+        with context.tracker.measure("embedding"):
+            eligible_embs = self.model.encode(eligible_texts, convert_to_numpy=True)
+            winner_embs = self.model.encode(winner_texts, convert_to_numpy=True)
 
         # Compute cosine similarity
         eligible_norms = np.linalg.norm(eligible_embs, axis=1, keepdims=True)
