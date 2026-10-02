@@ -1,6 +1,6 @@
 # RAGtune MCP Server
 
-`ragtune.mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that lets an LLM agent (Claude Code, Claude Desktop, or any MCP client) use RAGtune through typed tools: inspect components, write and validate configs, run pipelines, load datasets, build indexes, evaluate, estimate cost, and run the repo's scripts and tests. Spec: `specs/mcp-server.md`.
+`ragtune.mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that lets an LLM agent (any MCP client) use RAGtune through typed tools: inspect components, write and validate configs, run pipelines, load datasets, build indexes, evaluate, estimate cost, and run the repo's scripts and tests. Spec: `specs/mcp-server.md`.
 
 ## Setup
 
@@ -9,13 +9,7 @@ pip install -e ".[mcp]"        # adds mcp>=2.2 (Python >= 3.10)
 ragtune-mcp --help              # or: python -m ragtune.mcp --help
 ```
 
-**Claude Code** (run from the repo root):
-
-```bash
-claude mcp add ragtune -- "$(pwd)/.venv/bin/ragtune-mcp" --root "$(pwd)"
-```
-
-**Claude Desktop / any client using an `mcpServers` JSON config:**
+**Any MCP client (stdio):** point it at the `ragtune-mcp` command, e.g. with an `mcpServers` JSON config:
 
 ```json
 {

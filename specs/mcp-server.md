@@ -1,4 +1,4 @@
-This is the executable specification for the **RAGtune MCP server** (`ragtune.mcp`): a Model Context Protocol server that lets an LLM agent (Claude Code, Claude Desktop, any MCP client) use every capability of this repository through typed tools, without writing Python.
+This is the executable specification for the **RAGtune MCP server** (`ragtune.mcp`): a Model Context Protocol server that lets an LLM agent (any MCP client) use every capability of this repository through typed tools, without writing Python.
 
 ### **1. Goals**
 
