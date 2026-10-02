@@ -117,6 +117,28 @@ evaluate_scenarios(dataset_id="dataset-1", max_queries=50, background=True,
 | `estimate_throughput` | peak and achieved throughput, saturation knee, VRAM fit |
 | `cost_history` / `clear_cost_history` | read (entries or summary) or delete a cost-history JSONL |
 
+### Scripts, tests and CLI
+
+| Tool | Purpose |
+|---|---|
+| `list_scripts` | every `scripts/` and `examples/` file with its summary, CLI flags and env vars |
+| `run_script(script, args, env)` | run a benchmark/experiment/demo script as a background job |
+| `run_tests(paths, keyword)` | run pytest on paths under `tests/` |
+| `run_cli(args)` | any `ragtune` command verbatim, e.g. `["budget", "--type", "carbon", "--region", "eu-france"]` |
+
+Subprocess jobs log to `logs/mcp_jobs/<job_id>.log`; `job_status(job_id, tail_lines=...)` returns the tail. They run with stdin closed, so interactive commands (`init --wizard`, `visualize --edit`) fail fast instead of hanging; `config_template` and `update_config` cover them.
+
+## Prompts
+
+`build_pipeline(goal)`, `benchmark_pipeline(benchmark, dataset)` and `estimate_deployment_cost(workload)` walk an agent through the corresponding tool sequence.
+
+## Safety model
+
+- File reads and writes are confined to the workspace root.
+- Only `.py` files under `scripts/` or `examples/`, `pytest` on `tests/`, and the `ragtune` CLI can be executed.
+- Tools that overwrite or delete (`write_config`, `update_config`, `build_index`, `clear_cost_history`) carry MCP's `destructiveHint`; read-only tools carry `readOnlyHint`.
+- Python-object adapters (`LangChainRetriever`, `LlamaIndexRetriever`, `RAGtuneTransformer`, ...) are not exposed: MCP arguments are JSON, so there is no object to pass.
+
 ## Resources
 
 | URI | Content |

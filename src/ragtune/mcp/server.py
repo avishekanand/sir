@@ -11,9 +11,9 @@ from typing import List, Optional
 
 from mcp.server.mcpserver import MCPServer
 
-from ragtune.mcp import resources
+from ragtune.mcp import prompts, resources
 from ragtune.mcp.state import ServerState
-from ragtune.mcp.tools import budget, config, data, discovery, pipeline
+from ragtune.mcp.tools import budget, config, data, discovery, pipeline, runners
 
 INSTRUCTIONS = """\
 RAGtune is budget-aware iterative RAG middleware: retrieve, then rerank in
@@ -30,7 +30,7 @@ job_id; poll job_status for the result. Errors explain how to fix the call.
 # missing extra (e.g. pyterrier_dr for flex indexing) must not stop the server.
 REGISTRY_MODULES = ("ragtune.components", "ragtune.adapters", "ragtune.indexing")
 
-TOOL_MODULES = (discovery, config, data, pipeline, budget)
+TOOL_MODULES = (discovery, config, data, pipeline, budget, runners)
 
 
 def _load_registry(state: ServerState) -> None:
@@ -54,6 +54,7 @@ def build_server(root: Optional[str] = None) -> MCPServer:
     for module in TOOL_MODULES:
         module.register(server, state)
     resources.register(server, state)
+    prompts.register(server)
     return server
 
 
