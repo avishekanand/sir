@@ -51,6 +51,16 @@ claude mcp add ragtune -- "$(pwd)/.venv/bin/ragtune-mcp" --root "$(pwd)"
 | `list_default_scenarios` | the 7 built-in benchmark scenarios |
 | `job_status(job_id)` / `list_jobs` / `cancel_job(job_id)` | follow and stop background work |
 
+### Configs
+
+| Tool | Purpose |
+|---|---|
+| `config_template(output_path?)` | the `ragtune init` starter config, optionally written to a file |
+| `read_config(config_path)` / `write_config(config_path, config)` | load or save YAML; writing reports validation problems without blocking |
+| `update_config(updates, remove, config_path or config, output_path?)` | set/remove values by dotted path (`pipeline.components.reranker.type`), returns a unified diff; the non-interactive `ragtune visualize --edit` |
+| `validate_config(config_path or config)` | `ragtune validate`: schema, registered types, index path |
+| `visualize_config(config_path or config)` | the `ragtune visualize` ASCII diagram |
+
 ## Resources
 
 | URI | Content |
@@ -59,4 +69,5 @@ claude mcp add ragtune -- "$(pwd)/.venv/bin/ragtune-mcp" --root "$(pwd)"
 | `ragtune://specs/{name}` | `specs/<name>.md` |
 | `ragtune://config/defaults`, `ragtune://config/prompts` | runtime defaults and prompt templates |
 | `ragtune://budget/default-config` | default cost-estimation config with source citations |
+| `ragtune://config/template` | the `ragtune init` starter config |
 | `ragtune://registry` | registered component names per category |
