@@ -13,6 +13,7 @@ from mcp.server.mcpserver import MCPServer
 
 from ragtune.mcp import resources
 from ragtune.mcp.state import ServerState
+from ragtune.mcp.tools import discovery
 
 INSTRUCTIONS = """\
 RAGtune is budget-aware iterative RAG middleware: retrieve, then rerank in
@@ -29,7 +30,7 @@ job_id; poll job_status for the result. Errors explain how to fix the call.
 # missing extra (e.g. pyterrier_dr for flex indexing) must not stop the server.
 REGISTRY_MODULES = ("ragtune.components", "ragtune.adapters", "ragtune.indexing")
 
-TOOL_MODULES = ()  # tool groups register(mcp, state) here
+TOOL_MODULES = (discovery,)
 
 
 def _load_registry(state: ServerState) -> None:

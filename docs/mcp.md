@@ -38,6 +38,19 @@ claude mcp add ragtune -- "$(pwd)/.venv/bin/ragtune-mcp" --root "$(pwd)"
 - **Background work.** Slow tools accept `background=True` and return a `job_id`; poll `job_status`.
 - **Output safety.** Under stdio the SDK diverts the process's stdout to stderr, so prints from RAGtune, Rich or the PyTerrier JVM never corrupt the protocol stream.
 
+## Tools
+
+### Discovery and jobs
+
+| Tool | Purpose |
+|---|---|
+| `server_info` | versions, workspace root, which optional packages are installed, open handles |
+| `list_components(category?)` | registered component names (the `type` strings in configs) with constructor parameters |
+| `describe_component(category, name)` | full docstring, class path, source file, parameters |
+| `get_settings(key?, prompts?)` / `set_setting(key, value)` | read or override runtime defaults (`config/defaults.yaml`) and prompt templates |
+| `list_default_scenarios` | the 7 built-in benchmark scenarios |
+| `job_status(job_id)` / `list_jobs` / `cancel_job(job_id)` | follow and stop background work |
+
 ## Resources
 
 | URI | Content |
