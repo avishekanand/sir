@@ -61,6 +61,28 @@ claude mcp add ragtune -- "$(pwd)/.venv/bin/ragtune-mcp" --root "$(pwd)"
 | `validate_config(config_path or config)` | `ragtune validate`: schema, registered types, index path |
 | `visualize_config(config_path or config)` | the `ragtune visualize` ASCII diagram |
 
+### Datasets
+
+| Tool | Purpose |
+|---|---|
+| `list_benchmarks` | every benchmark `load_dataset` understands (BRIGHT, BEIR, FreshStack, ToolRet, SkillRet, SRA-Bench, CRUMB, OBLIQ, ir_datasets, HuggingFace, local files), datasets and options |
+| `load_dataset(benchmark, dataset, ...)` | load and keep a split in memory as a `dataset_id` (`background=True` for downloads) |
+| `list_datasets` / `drop_dataset` | loaded datasets and their sizes / free memory |
+| `get_queries` / `get_documents` | page through queries (optionally with qrels; BRIGHT includes reasoning) and documents |
+| `get_qrels(kind=...)` | `qrels`, or loader extras: `excluded_ids` (BRIGHT, OBLIQ), `nugget_qrels` (FreshStack) |
+| `export_corpus` | write the corpus as JSONL for `ragtune index` or a config's `data` section |
+
+Local files: `load_dataset(benchmark="local", options={"corpus_path": "data/corpus.jsonl", "queries_path": "data/queries.jsonl", "qrels_path": "data/qrels.tsv"})`. Queries are JSONL `{"id", "text"}`; qrels are BEIR TSV (`query-id`, `corpus-id`, `score` header) or JSONL.
+
+### Indexing
+
+| Tool | Purpose |
+|---|---|
+| `build_index(index_type, index_path, dataset_id or collection_path)` | build `pyterrier` (BM25), `faiss`, `numpy` or `flex` indexes; reuses an existing index unless `overwrite=True` |
+| `build_index_from_config(config_path)` | `ragtune index`: the config's `data` + `index` sections |
+| `index_status` | existence, files and recorded metadata |
+| `search_index` | query an index directly; with `dataset_id`, hits include text; `backend` selects the flex retriever |
+
 ## Resources
 
 | URI | Content |
