@@ -7,30 +7,6 @@ import numpy as np
 import pytest
 import yaml
 
-DOCS = {
-    "d1": "budget aware reranking with cross encoders",
-    "d2": "latency budgets for neural rerankers",
-    "d3": "a recipe for tomato soup",
-    "d4": "token costs of large language models",
-}
-
-
-@pytest.fixture
-def local_files(mcp_server):
-    root = mcp_server.root
-    (root / "data").mkdir()
-    (root / "data/corpus.jsonl").write_text("".join(
-        json.dumps({"doc_id": k, "text": v, "title": ""}) + "\n" for k, v in DOCS.items()))
-    (root / "data/queries.jsonl").write_text(
-        json.dumps({"id": "q1", "text": "reranking budget"}) + "\n" + json.dumps({"id": "q2", "text": "soup"}) + "\n")
-    (root / "data/qrels.tsv").write_text("query-id\tcorpus-id\tscore\nq1\td1\t1\nq1\td2\t1\nq2\td3\t1\n")
-    return {"corpus_path": "data/corpus.jsonl", "queries_path": "data/queries.jsonl", "qrels_path": "data/qrels.tsv"}
-
-
-@pytest.fixture
-def local_dataset(mcp_server, local_files):
-    return mcp_server.call("load_dataset", benchmark="local", options=local_files)["dataset_id"]
-
 
 def test_list_benchmarks_includes_direct_loaders(mcp_server):
     catalog = mcp_server.call("list_benchmarks")

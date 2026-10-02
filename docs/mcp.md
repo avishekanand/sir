@@ -83,6 +83,28 @@ Local files: `load_dataset(benchmark="local", options={"corpus_path": "data/corp
 | `index_status` | existence, files and recorded metadata |
 | `search_index` | query an index directly; with `dataset_id`, hits include text; `backend` selects the flex retriever |
 
+### Pipelines and evaluation
+
+| Tool | Purpose |
+|---|---|
+| `create_pipeline(config_path or config, ...)` | build a controller once (models load here) and keep it as a `pipeline_id`; options: `limit_overrides`, inline `documents`, `index_retriever`, `cost_estimation`, `initial_top_k` |
+| `run_pipeline(query, pipeline_id or config)` | `ragtune run`: ranked documents + final budget state, optional decision trace, per-run `limit_overrides` |
+| `list_pipelines` / `close_pipeline` | open pipelines / free their models |
+| `evaluate_run(qrels, results)` | NDCG, MAP, Recall, Precision at k, and MRR for any run |
+| `evaluate_pipeline(dataset_id, pipeline_id or config)` | run a pipeline over a dataset's queries: metrics, mean budget usage, per-query errors |
+| `evaluate_scenarios(dataset_id, index_retriever, scenarios?)` | benchmark several configs with one shared retriever (default: the 7 built-in scenarios) |
+
+`index_retriever` (`{"index_type", "index_path", "indexer_params"?, "dataset_id"?, "backend"?}`) retrieves through any index from `build_index`, BM25 or dense, with document text taken from the dataset so rerankers see real content.
+
+A typical evaluation session:
+
+```text
+load_dataset(benchmark="sra_bench", dataset="toolqa", background=True)  -> job_status -> dataset-1
+build_index(index_type="pyterrier", index_path="indexes/toolqa", dataset_id="dataset-1")
+evaluate_scenarios(dataset_id="dataset-1", max_queries=50, background=True,
+                   index_retriever={"index_type": "pyterrier", "index_path": "indexes/toolqa", "dataset_id": "dataset-1"})
+```
+
 ## Resources
 
 | URI | Content |

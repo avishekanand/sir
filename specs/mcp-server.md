@@ -57,7 +57,7 @@ Notable behaviors:
 | `ragtune init` (template), `--wizard` | `config_template`; the wizard's choices map to `update_config` |
 | `ragtune validate` | `validate_config` |
 | `ragtune visualize` (+ `--edit`) | `visualize_config` (+ `update_config` diff) |
-| `ragtune run` (`--limit`, `--collection-path`, `--verbose`) | `run_pipeline` (`limit_overrides`, `collection_path`, `include_trace`) |
+| `ragtune run` (`--limit`, `--verbose`) | `run_pipeline` (`limit_overrides`, `include_trace`). `--collection-path` only rewrites `pipeline.data`, which `run` never reads; `update_config` covers it |
 | `ragtune index` | `build_index_from_config` |
 | `ragtune budget` (all flags) | `estimate_cost` (+ `suggest`, `thresholds`) |
 | any CLI command verbatim | `run_cli` |
