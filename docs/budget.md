@@ -333,6 +333,18 @@ budget:
     rerank.latency_ms: 500   # only reranking, only latency: no token or doc caps
 ```
 
+```bash
+# Same thing from the CLI, ignoring the limits in the config file
+ragtune run cfg.yaml -q "query" --only-limits -l rerank.latency_ms=500 --breakdown
+# Budget only embedding time; drop one config-file limit with "none"
+ragtune run cfg.yaml -q "query" -l embedding.latency_ms=200 -l tokens=none
+# Benchmark runner: apply to every scenario and report per-query averages
+python scripts/run_tool_retrieval.py --config configs/benchmark_skillret_bm25.yaml \
+    --only-limits --limit rerank.latency_ms=500 --report-keys rerank.latency_ms,rerank.docs
+```
+
+`--only-limits` replaces *every* limit, including the `rerank_docs: 0` that baseline scenarios use to switch reranking off, so a noop baseline then "reranks" the pool (its metrics do not change).
+
 Usage is always measured, so `final_budget_state["rerank.latency_ms"]` is available even without a limit. Custom components can attribute their own work with `with context.tracker.measure("embedding"): ...`.
 
 ---

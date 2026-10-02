@@ -67,7 +67,9 @@ Executes the RAG pipeline for a given query.
 - **Options**:
   - `--query, -q`: The user query string (Required).
   - `--verbose, -v`: Show the full iterative execution trace (Estimator scores, Scheduler decisions, etc.).
-  - `--limit, -l`: Override budget limits at runtime (e.g., `-l tokens=1000 -l rerank_docs=5`).
+  - `--limit, -l`: Override budget limits at runtime (e.g., `-l tokens=1000 -l rerank_docs=5`). Component-scoped keys budget a single stage (`-l rerank.latency_ms=500`); `-l tokens=none` removes a limit. See [Component-Scoped Budgets](budget.md#component-scoped-budgets).
+  - `--only-limits`: Ignore the config file's limits and enforce only the `--limit` values.
+  - `--breakdown, -b`: Show per-component usage (latency, tokens, docs, calls) against limits.
 
 **Example**:
 ```bash
@@ -131,6 +133,12 @@ pipeline:
 You can run the same pipeline with different constraints without editing the YAML:
 ```bash
 ragtune run config.yaml -q "query" --limit tokens=500 --limit rerank_docs=2
+```
+
+### Budgeting a Single Stage
+Budget only reranking latency, with no token or document caps:
+```bash
+ragtune run config.yaml -q "query" --only-limits -l rerank.latency_ms=500 --breakdown
 ```
 
 ### Debugging with Verbose
