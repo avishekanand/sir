@@ -112,6 +112,14 @@ DEFAULT_CONFIG = {
 }
 
 
+def _parse_ks(raw: str) -> List[int]:
+    """'10,50' -> [10, 50]; shared by --eval-ks and EVAL_KS."""
+    try:
+        return [int(k) for k in raw.split(",") if k.strip()]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected comma-separated integers, got {raw!r}") from None
+
+
 def _load_config(args) -> Dict[str, Any]:
     """Merge config file → env vars → defaults. Env vars win over file; CLI wins over env."""
     cfg = dict(DEFAULT_CONFIG)
@@ -130,7 +138,7 @@ def _load_config(args) -> Dict[str, Any]:
         "subset": ("SUBSET", str),
         "queries": ("QUERIES", int),
         "top_k": ("TOP_K", int),
-        "eval_ks": ("EVAL_KS", lambda s: [int(x) for x in s.split(",")]),
+        "eval_ks": ("EVAL_KS", _parse_ks),
         "index_type": ("INDEX_TYPE", str),
         "retriever": ("RETRIEVER", str),
         "wmodel": ("WMODEL", str),
@@ -142,7 +150,7 @@ def _load_config(args) -> Dict[str, Any]:
         if raw is not None and raw != "":
             try:
                 cfg[key] = cast(raw)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, argparse.ArgumentTypeError):
                 _console.print(
                     f"[yellow]Warning: bad {env_name} value '{raw}', keeping default[/yellow]"
                 )
@@ -365,7 +373,7 @@ def main():
     )
     parser.add_argument("--top-k", type=int, default=None, help="Candidates per query")
     parser.add_argument(
-        "--eval-ks", type=str, default=None, help="Comma-separated cutoffs, e.g. 10,50"
+        "--eval-ks", type=_parse_ks, default=None, help="Comma-separated cutoffs, e.g. 10,50"
     )
     parser.add_argument(
         "--index-type", type=str, default=None, help="pyterrier | faiss | numpy | flex"
