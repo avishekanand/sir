@@ -17,6 +17,48 @@ app = typer.Typer(help="RAGtune CLI: Budget-aware RAG middleware.")
 console = Console()
 
 
+def default_config_template() -> dict:
+    """The starter pipeline config written by `ragtune init` (without --wizard)."""
+    return {
+        "pipeline": {
+            "name": "My First RAGtune Pipeline",
+            "data": {
+                "collection_path": "./data/bright_sample/corpus.json",
+                "collection_format": "json",
+                "id_field": "doc_id",
+                "text_field": "content",
+                "metadata_fields": ["source"],
+            },
+            "index": {
+                "framework": "pyterrier",
+                "params": {"index_path": "./index"},
+            },
+            "components": {
+                "retriever": {
+                    "type": "pyterrier",
+                    "params": {"index_path": "./index"},
+                },
+                "reranker": {
+                    "type": "ollama-listwise",
+                    "params": {"model_name": "deepseek-r1:8b"},
+                },
+                "reformulator": {"type": "identity"},
+                "assembler": {"type": "greedy"},
+                "scheduler": {"type": "graceful-degradation"},
+                "estimator": {"type": "baseline"},
+            },
+            "budget": {
+                "limits": {
+                    "tokens": 4000,
+                    "rerank_docs": 50,
+                    "latency_ms": 2000.0,
+                    "retrieval_calls": 5,
+                }
+            },
+        }
+    }
+
+
 @app.command()
 def init(
     path: Path = typer.Option(
@@ -56,44 +98,7 @@ def init(
 
         config_data = run_init_wizard()
     else:
-        config_data = {
-            "pipeline": {
-                "name": "My First RAGtune Pipeline",
-                "data": {
-                    "collection_path": "./data/bright_sample/corpus.json",
-                    "collection_format": "json",
-                    "id_field": "doc_id",
-                    "text_field": "content",
-                    "metadata_fields": ["source"],
-                },
-                "index": {
-                    "framework": "pyterrier",
-                    "params": {"index_path": "./index"},
-                },
-                "components": {
-                    "retriever": {
-                        "type": "pyterrier",
-                        "params": {"index_path": "./index"},
-                    },
-                    "reranker": {
-                        "type": "ollama-listwise",
-                        "params": {"model_name": "deepseek-r1:8b"},
-                    },
-                    "reformulator": {"type": "identity"},
-                    "assembler": {"type": "greedy"},
-                    "scheduler": {"type": "graceful-degradation"},
-                    "estimator": {"type": "baseline"},
-                },
-                "budget": {
-                    "limits": {
-                        "tokens": 4000,
-                        "rerank_docs": 50,
-                        "latency_ms": 2000.0,
-                        "retrieval_calls": 5,
-                    }
-                },
-            }
-        }
+        config_data = default_config_template()
 
     with open(path, "w") as f:
         yaml.dump(config_data, f, sort_keys=False)
@@ -256,59 +261,17 @@ def validate(
         raise typer.Exit(code=1)
 
     try:
-        from ragtune.config.models import RAGtuneConfig
-
         console.print(f"[dim]Validating schema for {config_path}...[/dim]")
         with open(config_path, "r") as f:
             data = yaml.safe_load(f)
 
-        # 1. Pydantic Schema Validation
-        config_obj = RAGtuneConfig(**data)
+        from ragtune.config.models import RAGtuneConfig
 
-        # 2. Registry Check
-        # Force load components
-        try:
-            import ragtune.adapters  # noqa
-            import ragtune.components  # noqa
-        except ImportError:
-            pass
-
+        RAGtuneConfig(**data)  # schema errors surface here, before the registry check
         console.print("[dim]Checking registry for components...[/dim]")
-        pipeline = config_obj.pipeline
-        components = pipeline.components
-
-        problems = []
-
-        check_list = [
-            ("retriever", components.retriever, registry.get_retriever),
-            ("reranker", components.reranker, registry.get_reranker),
-            ("reformulator", components.reformulator, registry.get_reformulator),
-            ("assembler", components.assembler, registry.get_assembler),
-            ("scheduler", components.scheduler, registry.get_scheduler),
-        ]
-
-        # Handle estimator separately as it can be a list
-        estimators = (
-            components.estimator
-            if isinstance(components.estimator, list)
-            else [components.estimator]
+        problems = ConfigLoader.find_problems(
+            data, allow_missing_index=allow_missing_index
         )
-        for est in estimators:
-            check_list.append(("estimator", est, registry.get_estimator))
-
-        for cat, comp, getter in check_list:
-            if not getter(comp.type):
-                problems.append(
-                    f"Component '{comp.type}' not found in registry for category '{cat}'."
-                )
-
-        # 3. Path / Index checks
-        if not allow_missing_index and pipeline.index:
-            idx_path = pipeline.index.params.get("index_path")
-            if idx_path and not Path(idx_path).exists():
-                problems.append(
-                    f"Index path '{idx_path}' does not exist. Run 'ragtune index' to build it."
-                )
 
         if problems:
             console.print(

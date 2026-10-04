@@ -339,3 +339,57 @@ class ConfigLoader:
                 },
             },
         ]
+
+    # ── Validation ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def find_problems(
+        data: Dict[str, Any],
+        allow_missing_index: bool = False,
+        base_dir: Optional[Path] = None,
+    ) -> List[str]:
+        """Registry and index-path problems in a config (the checks behind `ragtune validate`).
+
+        Relative index paths are checked against base_dir (default: the
+        working directory). Raises pydantic.ValidationError if the config
+        does not match the v0.2 schema.
+        """
+        from ragtune.config.models import RAGtuneConfig
+
+        pipeline = RAGtuneConfig(**data).pipeline
+        try:
+            import ragtune.adapters  # noqa: F401  populate the registry
+            import ragtune.components  # noqa: F401
+        except ImportError:
+            pass
+
+        components = pipeline.components
+        check_list = [
+            ("retriever", components.retriever, registry.get_retriever),
+            ("reranker", components.reranker, registry.get_reranker),
+            ("reformulator", components.reformulator, registry.get_reformulator),
+            ("assembler", components.assembler, registry.get_assembler),
+            ("scheduler", components.scheduler, registry.get_scheduler),
+        ]
+        # The estimator can be a list (CompositeEstimator)
+        estimators = (
+            components.estimator
+            if isinstance(components.estimator, list)
+            else [components.estimator]
+        )
+        for est in estimators:
+            check_list.append(("estimator", est, registry.get_estimator))
+
+        problems = [
+            f"Component '{comp.type}' not found in registry for category '{cat}'."
+            for cat, comp, getter in check_list
+            if not getter(comp.type)
+        ]
+
+        if not allow_missing_index and pipeline.index:
+            idx_path = pipeline.index.params.get("index_path")
+            if idx_path and not (Path(base_dir or ".") / idx_path).exists():
+                problems.append(
+                    f"Index path '{idx_path}' does not exist. Run 'ragtune index' to build it."
+                )
+        return problems
