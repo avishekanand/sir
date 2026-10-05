@@ -2,8 +2,6 @@
 
 RAGtune is a budget-aware middleware designed to sit between your application and various retrieval/reranking backends. It treats **cost** and **latency** as first-class constraints.
 
-![RAGtune Architecture Diagram](/Users/avishekanand/.gemini/antigravity/brain/a0653a2b-9cc6-469b-8c68-cca1a62b23c2/ragtune_active_learning_architecture_1771146616863.png)
-
 ## Core Philosophy: Active Learning & Feedback Loops
 
 Unlike traditional RAG pipelines that follow a static "waterfall" (Retrieve -> Rerank -> Final), RAGtune implements an **Active Learning** approach using an iterative feedback loop:
@@ -44,7 +42,7 @@ The "Bank". **v0.5 Enhancement**: Now supports **arbitrary cost types** via a di
 ## Flow Diagram (Mermaid)
 
 > [!NOTE]
-> If the diagram below does not render, ensure you are using the **Markdown Preview** (`Cmd+Shift+V`) and that your editor supports Mermaid. I have provided a high-quality static image above for fallback.
+> GitHub renders Mermaid diagrams natively in file views and markdown previews.
 
 ```mermaid
 graph TD

@@ -54,17 +54,31 @@ ragtune init
 Edit `ragtune_config.yaml` to define your budget and components.
 ```yaml
 pipeline:
+  data:
+    collection_path: "./data/corpus.json"
+    collection_format: "json"
+  index:
+    type: "sparse"
+    index_path: "./index"
   budget:
-    tokens: 4000
-    latency_ms: 1500
+    limits:
+      tokens: 4000
+      latency_ms: 1500
   components:
     retriever:
-      type: "bm25"
+      type: "pyterrier"
+      params: { index_path: "./index" }
     reranker:
       type: "cross-encoder"
 ```
 
-### 3. Run the Pipeline
+### 3. Build the Index
+The retriever reads a pre-built index, so build it once before the first run:
+```bash
+ragtune index ragtune_config.yaml
+```
+
+### 4. Run the Pipeline
 Execute the pipeline instantly from the terminal.
 ```bash
 ragtune run ragtune_config.yaml --query "How does Active Learning optimize RAG?"
@@ -84,9 +98,9 @@ Whether you prefer the readability of **YAML** or the machine-compatibility of *
 # ragtune_config.yaml
 pipeline:
   name: "My Pipeline"
-  budget: { tokens: 2000 }
+  budget: { limits: { tokens: 2000 } }
   components:
-    retriever: { type: "bm25" }
+    retriever: { type: "pyterrier" }
 ```
 
 **JSON Configuration:**
@@ -94,9 +108,9 @@ pipeline:
 {
   "pipeline": {
     "name": "My Pipeline",
-    "budget": { "tokens": 2000 },
+    "budget": { "limits": { "tokens": 2000 } },
     "components": {
-      "retriever": { "type": "bm25" }
+      "retriever": { "type": "pyterrier" }
     }
   }
 }
@@ -115,7 +129,7 @@ The visualization renders a box-and-arrow diagram representing the pipeline:
 │  ┌────────────┐    ┌────────────┐    ┌────────────┐    ┌────────────┐│
 │  │ RETRIEVER  │───▶│REFORMULATOR│───▶│  RERANKER  │───▶│ ASSEMBLER  ││
 │  ├────────────┤    ├────────────┤    ├────────────┤    ├────────────┤│
-│  │ type: bm25 │    │ type: llm  │    │ type: cross│    │ type: greed││
+│  │type: pyterrier│ │ type: llm  │    │ type: cross│    │ type: greed││
 │  └────────────┘    └────────────┘    └────────────┘    └────────────┘│
 │                                              ▲                       │
 │                    ┌────────────┐    ┌───────┴────┐                  │
