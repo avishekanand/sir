@@ -42,3 +42,39 @@ def test_similarity_estimator_boosting():
         assert "b" in estimates
         # Mock returns identical vectors, so similarity is max
         assert estimates["b"].priority > 0.0
+
+
+# --- embedding.* budget (specs/component-scoped-budgets.md) ---
+
+def _similarity_pool():
+    pool = CandidatePool([
+        PoolItem(doc_id="a", content="fox", sources={"ret": 0.5}),
+        PoolItem(doc_id="b", content="dog", sources={"ret": 0.5}),
+    ])
+    pool.transition(["a"], ItemState.IN_FLIGHT)
+    pool.update_scores({"a": 1.0}, strategy="test")
+    return pool
+
+
+def test_similarity_estimator_measures_embedding_time():
+    with patch("sentence_transformers.SentenceTransformer") as mock_st:
+        mock_st.return_value.encode.side_effect = lambda texts, **kw: np.ones((len(texts), 2))
+
+        tracker = CostTracker(CostBudget(limits={}), ControllerTrace())
+        SimilarityEstimator(model_name="mock").value(
+            _similarity_pool(), RAGtuneContext(query="fox", tracker=tracker)
+        )
+    assert "embedding.latency_ms" in tracker.consumed
+
+
+def test_exhausted_embedding_budget_skips_encoding():
+    with patch("sentence_transformers.SentenceTransformer") as mock_st:
+        model = MagicMock()
+        mock_st.return_value = model
+
+        tracker = CostTracker(CostBudget(limits={"embedding.latency_ms": 0}), ControllerTrace())
+        out = SimilarityEstimator(model_name="mock").value(
+            _similarity_pool(), RAGtuneContext(query="fox", tracker=tracker)
+        )
+    model.encode.assert_not_called()
+    assert out["b"].priority == 0.5  # retrieval-score fallback

@@ -81,9 +81,10 @@ class RAGtuneController:
         max_pool = config.get("retrieval.max_pool_size", 50)
 
         pool = CandidatePool()
-        if tracker.try_consume_retrieval():
-            docs_orig = self.retriever.retrieve(context, top_k=d_orig)
-            pool.add_items(docs_orig, source="original")
+        with tracker.measure("retrieval"):
+            if tracker.try_consume_retrieval():
+                docs_orig = self.retriever.retrieve(context, top_k=d_orig)
+                pool.add_items(docs_orig, source="original")
 
         # 2. Reformulation Decision (Gated by Estimator)
         queries = []
@@ -91,8 +92,11 @@ class RAGtuneController:
             if query in self._reformulation_cache:
                 queries = self._reformulation_cache[query]
                 trace.add("controller", "reformulation_cache_hit", query=query)
+            elif tracker.component_exhausted("reformulation"):
+                trace.add("controller", "reformulation_skipped", reason="budget_exhausted")
             else:
-                queries = self.reformulator.generate(context)
+                with tracker.measure("reformulation"):
+                    queries = self.reformulator.generate(context)
                 self._reformulation_cache[query] = queries
 
         if not queries:
@@ -106,18 +110,19 @@ class RAGtuneController:
                 continue
             seen_queries.add(q_norm)
 
-            if not tracker.try_consume_retrieval():
-                trace.add(
-                    "controller",
-                    "retrieval_skipped",
-                    query=q,
-                    reason="budget_exhausted",
-                )
-                continue
+            with tracker.measure("retrieval"):
+                if tracker.component_exhausted("retrieval") or not tracker.try_consume_retrieval():
+                    trace.add(
+                        "controller",
+                        "retrieval_skipped",
+                        query=q,
+                        reason="budget_exhausted",
+                    )
+                    continue
 
-            q_context = context.model_copy(update={"query": q})
-            docs_ref = self.retriever.retrieve(q_context, top_k=d_ref)
-            pool.add_items(docs_ref, source=f"rewrite_{q_idx}")
+                q_context = context.model_copy(update={"query": q})
+                docs_ref = self.retriever.retrieve(q_context, top_k=d_ref)
+                pool.add_items(docs_ref, source=f"rewrite_{q_idx}")
 
         # Enforce pool cap
         pool.enforce_cap(max_pool)
@@ -132,9 +137,18 @@ class RAGtuneController:
 
         # 3. Iterative Loop
         iteration = 0
-        while not tracker.is_exhausted():
-            # A. Valorization (Estimator determines priorities)
-            est_outputs = self.estimator.value(pool, context)
+        estimation_skipped = False
+        while not tracker.is_exhausted("rerank"):
+            # A. Valorization (Estimator determines priorities). An exhausted
+            # estimation budget keeps the last priorities instead of stopping.
+            if tracker.component_exhausted("estimation"):
+                est_outputs = {}
+                if not estimation_skipped:
+                    trace.add("controller", "estimation_skipped", reason="budget_exhausted")
+                    estimation_skipped = True
+            else:
+                with tracker.measure("estimation"):
+                    est_outputs = self.estimator.value(pool, context)
             priorities = {k: v.priority for k, v in est_outputs.items()}
             pool.apply_priorities(priorities)
 
@@ -163,14 +177,15 @@ class RAGtuneController:
             # E. Execution (Reranker processes batch)
             try:
                 batch_items = pool.get_items(proposal.doc_ids)
-                results = self.reranker.rerank(
-                    batch_items, context, strategy=proposal.strategy
-                )
-                # F. Update scores and move to RERANKED
-                dropped = pool.update_scores(
-                    results, strategy=proposal.strategy, expected_ids=proposal.doc_ids
-                )
-                tracker.consume(proposal.expected_cost)
+                with tracker.measure("rerank"):
+                    results = self.reranker.rerank(
+                        batch_items, context, strategy=proposal.strategy
+                    )
+                    # F. Update scores and move to RERANKED
+                    dropped = pool.update_scores(
+                        results, strategy=proposal.strategy, expected_ids=proposal.doc_ids
+                    )
+                    tracker.consume(proposal.expected_cost)
 
                 trace.add(
                     "controller",
@@ -238,7 +253,8 @@ class RAGtuneController:
 
         # 4. Assembly
         active_items = pool.get_active_items()
-        final_docs = self.assembler.assemble(active_items, context)
+        with tracker.measure("assembly"):
+            final_docs = self.assembler.assemble(active_items, context)
 
         # Build final budget state with cost tracking
         final_state = tracker.snapshot()

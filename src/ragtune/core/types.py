@@ -1,8 +1,12 @@
+import sys
 import time
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict
+
+# Remaining amount reported for a budget dimension that has no limit.
+UNLIMITED = sys.maxsize
 
 class ItemState(str, Enum):
     CANDIDATE = "candidate"  # Eligible for scheduling
@@ -25,6 +29,19 @@ class RemainingBudgetView(BaseModel):
     remaining_tokens: int
     remaining_rerank_docs: int
     remaining_rerank_calls: int
+    # Remaining amount per component-scoped limit, e.g. {"rerank.tokens": 1200}.
+    scoped: Dict[str, int] = Field(default_factory=dict)
+
+    def for_component(self, component: str) -> "RemainingBudgetView":
+        """Narrow each field to the tighter of the global and '<component>.*' remainders."""
+        def narrow(value: int, dimension: str) -> int:
+            return min(value, self.scoped.get(f"{component}.{dimension}", UNLIMITED))
+
+        return self.model_copy(update={
+            "remaining_tokens": narrow(self.remaining_tokens, "tokens"),
+            "remaining_rerank_docs": narrow(self.remaining_rerank_docs, "docs"),
+            "remaining_rerank_calls": narrow(self.remaining_rerank_calls, "calls"),
+        })
 
 class ScoredDocument(BaseModel):
     """Atomic unit of content."""

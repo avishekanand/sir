@@ -52,6 +52,8 @@ class ActiveLearningScheduler(BaseScheduler):
     def select_batch(
         self, pool: CandidatePool, budget: RemainingBudgetView
     ) -> Optional[BatchProposal]:
+        # Reranking also answers to any "rerank.*" limits, not just global ones.
+        budget = budget.for_component("rerank")
         eligible = pool.get_eligible()
         if not eligible or budget.remaining_rerank_docs <= 0:
             return None
@@ -106,6 +108,8 @@ class GracefulDegradationScheduler(BaseScheduler):
     def select_batch(
         self, pool: CandidatePool, budget: RemainingBudgetView
     ) -> Optional[BatchProposal]:
+        # Reranking also answers to any "rerank.*" limits, not just global ones.
+        budget = budget.for_component("rerank")
         eligible = pool.get_eligible()
         if not eligible or budget.remaining_rerank_docs <= 0:
             return None

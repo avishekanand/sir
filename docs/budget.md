@@ -305,6 +305,50 @@ Options:
 
 ---
 
+## Component-Scoped Budgets
+
+The cost loaders above *estimate* spend. At run time, `CostTracker` *enforces* limits inside the controller loop, and every limit can target a single pipeline stage with a `<component>.<dimension>` key. Full semantics: `specs/component-scoped-budgets.md`.
+
+| Component | Measured around |
+|---|---|
+| `retrieval` | each `retriever.retrieve()` (includes dense query encoding) |
+| `reformulation` | `reformulator.generate()` |
+| `estimation` | `estimator.value()`, once per loop iteration |
+| `embedding` | encoder calls that opt in (`SimilarityEstimator`) |
+| `rerank` | `reranker.rerank()`, once per batch |
+| `assembly` | `assembler.assemble()` |
+
+| Dimension | Meaning |
+|---|---|
+| `latency_ms` | cumulative wall time inside the stage (nested stages are included) |
+| `tokens` | tokens consumed while the stage runs |
+| `docs` | rerank docs consumed while the stage runs |
+| `calls` | rerank, retrieval or reformulation calls made by the stage |
+
+A scoped limit gates only its own stage: an exhausted `rerank.*` key stops the loop, `estimation.*` skips the estimator, `embedding.*` makes `SimilarityEstimator` fall back to retrieval scores, `retrieval.*` skips supplemental retrievals, `reformulation.*` skips the reformulator, and `assembly.tokens` caps the assembled context. Global keys (`tokens`, `rerank_docs`, `latency_ms`, ...) keep their existing behavior, and **a dimension with no limit is unlimited**.
+
+```yaml
+budget:
+  limits:
+    rerank.latency_ms: 500   # only reranking, only latency: no token or doc caps
+```
+
+```bash
+# Same thing from the CLI, ignoring the limits in the config file
+ragtune run cfg.yaml -q "query" --only-limits -l rerank.latency_ms=500 --breakdown
+# Budget only embedding time; drop one config-file limit with "none"
+ragtune run cfg.yaml -q "query" -l embedding.latency_ms=200 -l tokens=none
+# Benchmark runner: apply to every scenario and report per-query averages
+python scripts/run_tool_retrieval.py --config configs/benchmark_skillret_bm25.yaml \
+    --only-limits --limit rerank.latency_ms=500 --report-keys rerank.latency_ms,rerank.docs
+```
+
+`--only-limits` replaces *every* limit, including the `rerank_docs: 0` that baseline scenarios use to switch reranking off, so a noop baseline then "reranks" the pool (its metrics do not change).
+
+Usage is always measured, so `final_budget_state["rerank.latency_ms"]` is available even without a limit. Custom components can attribute their own work with `with context.tracker.measure("embedding"): ...`.
+
+---
+
 ## Cost Optimization
 
 The optimizer analyzes `BudgetResult` and suggests improvements:

@@ -20,6 +20,10 @@ Usage (env vars):
 
 Usage (config file):
     python scripts/run_tool_retrieval.py --config configs/benchmark_skillret.yaml
+
+Component-scoped budgets (override every scenario's limits):
+    python scripts/run_tool_retrieval.py --config configs/benchmark_skillret_bm25.yaml \
+        --only-limits --limit rerank.latency_ms=500 --report-keys rerank.latency_ms,rerank.docs
 """
 
 import argparse
@@ -36,6 +40,7 @@ from ragtune.data.constants import Benchmark, TOOLRET_SUBSETS, SRA_BENCH_SUBSETS
 from ragtune.evaluation.RetrievalEvaluator import RetrievalEvaluator
 from ragtune.indexing import IndexFactory
 from ragtune.cli.config_loader import ConfigLoader
+from ragtune.core.budget import parse_scoped_key
 from ragtune.adapters.pyterrier import PyTerrierRetriever
 from ragtune.utils.config import config
 
@@ -109,6 +114,11 @@ DEFAULT_CONFIG = {
     "corpus_sep": "\n",  # field separator; "\n\n" matches Rahul's exact format
     "min_relevance": 1,  # min qrel relevance; 1 = positive-only (Rahul's PR #20)
     "max_query_chars": 2000,  # sanitize_query cap; guards PyTerrier TerrierQL
+    # Budget limits applied on top of every scenario's limits, e.g.
+    # {"rerank.latency_ms": 500, "tokens": None}; None removes a limit.
+    "limit_overrides": {},
+    "only_limits": False,  # True = scenario limits are replaced by limit_overrides
+    "report_keys": [],  # budget-state keys reported as per-query averages
 }
 
 
@@ -172,7 +182,19 @@ def _load_config(args) -> Dict[str, Any]:
         cfg["index_dir"] = args.index_dir
     if args.force_reindex:
         cfg["force_reindex"] = True
+    if args.limit:
+        cfg["limit_overrides"] = {
+            **(cfg.get("limit_overrides") or {}),
+            **ConfigLoader.parse_limit_overrides(args.limit),
+        }
+    if args.only_limits:
+        cfg["only_limits"] = True
+    if args.report_keys:
+        cfg["report_keys"] = [k.strip() for k in args.report_keys.split(",") if k.strip()]
 
+    for key in [*(cfg.get("limit_overrides") or {}), *(cfg.get("report_keys") or [])]:
+        if "." in key:
+            parse_scoped_key(key)  # config-file keys get the same check as CLI ones
     return cfg
 
 
@@ -312,6 +334,7 @@ def run_scenario(
     eval_ks: List[int],
     report_rerank: bool,
     max_query_chars: int = 2000,
+    report_keys: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Run a controller over all queries, return metrics + telemetry."""
     ps(f"  Running [{name}]...")
@@ -319,6 +342,7 @@ def run_scenario(
     results: Dict[str, Dict[str, float]] = {}
     latencies: List[float] = []
     docs_reranked: List[float] = []
+    reported: Dict[str, List[float]] = {key: [] for key in report_keys or []}
 
     for qid, qtext in queries.items():
         try:
@@ -326,6 +350,8 @@ def run_scenario(
             out = controller.run(sanitize_query(qtext, max_chars=max_query_chars))
             latencies.append((time.time() - q_start) * 1000)
             docs_reranked.append(out.final_budget_state.get("rerank_docs", 0))
+            for key, values in reported.items():
+                values.append(out.final_budget_state.get(key, 0))
             results[qid] = {d.id: 1.0 / (i + 1) for i, d in enumerate(out.documents)}
         except Exception as e:
             _console.print(f"  [yellow]ERR {qid}: {e}[/yellow]")
@@ -347,6 +373,8 @@ def run_scenario(
     if report_rerank and latencies:
         row["avg_rerank_docs"] = round(sum(docs_reranked) / len(docs_reranked), 1)
         row["avg_latency_ms"] = round(sum(latencies) / len(latencies), 1)
+    for key, values in reported.items():
+        row[f"avg_{key}"] = round(sum(values) / len(values), 1) if values else 0.0
 
     ps(
         f"  {name:28s} "
@@ -389,9 +417,32 @@ def main():
         action="store_true",
         help="Rebuild index even if it already exists",
     )
+    parser.add_argument(
+        "--limit",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help="Override a budget limit in every scenario (repeatable), e.g. "
+        "rerank.latency_ms=500; a value of none removes the limit",
+    )
+    parser.add_argument(
+        "--only-limits",
+        action="store_true",
+        help="Replace every scenario's limits with the --limit values",
+    )
+    parser.add_argument(
+        "--report-keys",
+        type=str,
+        default=None,
+        help="Comma-separated budget-state keys to report as per-query averages, "
+        "e.g. rerank.latency_ms,embedding.latency_ms",
+    )
     args = parser.parse_args()
 
-    cfg = _load_config(args)
+    try:
+        cfg = _load_config(args)
+    except ValueError as e:  # bad --limit / --report-keys: fail before loading any data
+        parser.error(str(e))
 
     # If a config file contains scenarios (top-level 'scenarios:' key),
     # feed them through SCENARIOS so ConfigLoader picks them up.
@@ -442,7 +493,11 @@ def main():
         retriever = build_retriever(corpus, cfg)
 
         # Build scenarios via ConfigLoader (registry-backed, env-configurable)
-        scenarios = ConfigLoader.create_controllers_from_env(retriever)
+        scenarios = ConfigLoader.create_controllers_from_env(
+            retriever,
+            budget_overrides=cfg.get("limit_overrides") or None,
+            replace_limits=cfg.get("only_limits", False),
+        )
 
         for name, controller in scenarios:
             row = run_scenario(
@@ -453,6 +508,7 @@ def main():
                 EVAL_KS,
                 cfg["report_rerank"],
                 max_query_chars=cfg.get("max_query_chars", 2000),
+                report_keys=cfg.get("report_keys"),
             )
             row.update({"benchmark": BENCHMARK, "subset": subset})
             all_rows.append(row)

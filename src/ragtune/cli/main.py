@@ -150,7 +150,22 @@ def run(
         None,
         "--limit",
         "-l",
-        help="Override budget limits (e.g. --limit tokens=1000). Can be used multiple times.",
+        help=(
+            "Override budget limits (e.g. --limit tokens=1000). Can be used multiple times. "
+            "Component-scoped keys like rerank.latency_ms=500 budget a single stage; "
+            "a value of none removes a limit."
+        ),
+    ),
+    only_limits: bool = typer.Option(
+        False,
+        "--only-limits",
+        help="Ignore the config file's budget limits; enforce only --limit values.",
+    ),
+    breakdown: bool = typer.Option(
+        False,
+        "--breakdown",
+        "-b",
+        help="Show per-component usage (latency, tokens, docs, calls) against limits.",
     ),
 ):
     """
@@ -162,17 +177,11 @@ def run(
         )
         raise typer.Exit(code=1)
 
-    # Parse limits if provided
-    budget_overrides = {}
-    if limits:
-        for limit_str in limits:
-            try:
-                k, v = limit_str.split("=")
-                budget_overrides[k] = float(v)
-            except ValueError:
-                console.print(
-                    f"[bold yellow]Warning:[/bold yellow] Invalid limit format: {limit_str}. Expected KEY=VALUE"
-                )
+    try:
+        budget_overrides = ConfigLoader.parse_limit_overrides(limits or [])
+    except ValueError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(code=1)
 
     # Force load default components/adapters to ensure registry is populated
     try:
@@ -198,7 +207,7 @@ def run(
         console.print(f"[bold green]Running Pipeline:[/bold green] {name}")
 
         controller = ConfigLoader.create_controller(
-            config_data, budget_overrides=budget_overrides
+            config_data, budget_overrides=budget_overrides, replace_limits=only_limits
         )
 
     except Exception as e:
@@ -226,6 +235,9 @@ def run(
             console.print(f"   {doc.content[:200]}...")
             console.print(f"   [dim]{doc.metadata}[/dim]\n")
 
+        if breakdown:
+            _print_component_breakdown(result.final_budget_state, controller.budget.limits)
+
         if verbose:
             console.print(
                 Panel(str(result.trace), title="[bold]Execution Trace[/bold]")
@@ -237,6 +249,32 @@ def run(
 
         traceback.print_exc()
         raise typer.Exit(code=1)
+
+
+def _print_component_breakdown(state: dict, limits: dict) -> None:
+    """Render per-component usage from a final budget state as a table."""
+    from rich.table import Table
+    from ragtune.core.budget import BUDGET_COMPONENTS, BUDGET_DIMENSIONS, group_by_component
+
+    usage = group_by_component(state)
+    # Also list components that have a limit but recorded nothing (e.g. a stage that never ran).
+    limited = set(group_by_component(limits))
+    table = Table(title="Per-Component Usage (used / limit)")
+    table.add_column("Component", style="cyan")
+    for dimension in BUDGET_DIMENSIONS:
+        table.add_column(dimension, justify="right")
+    for component in BUDGET_COMPONENTS:
+        if component not in usage and component not in limited:
+            continue
+        used = usage.get(component, {})
+        cells = []
+        for dimension in BUDGET_DIMENSIONS:
+            value = used.get(dimension)
+            limit = limits.get(f"{component}.{dimension}")
+            cell = "-" if value is None else f"{value:.1f}" if dimension == "latency_ms" else f"{value:g}"
+            cells.append(cell if limit is None else f"{cell} / {limit:g}")
+        table.add_row(component, *cells)
+    console.print(table)
 
 
 @app.command()

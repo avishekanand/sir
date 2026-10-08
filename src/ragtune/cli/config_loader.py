@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 from ragtune.registry import registry
 from ragtune.core.controller import RAGtuneController
-from ragtune.core.budget import CostBudget
+from ragtune.core.budget import CostBudget, parse_scoped_key
 from ragtune.core.interfaces import (
     BaseRetriever,
     BaseReranker,
@@ -15,6 +15,10 @@ from ragtune.core.interfaces import (
     BaseEstimator,
     BaseFeedback,
 )
+
+
+# Override values that remove a limit instead of setting it.
+_UNSET_LIMIT_VALUES = {"none", "off", "unlimited"}
 
 
 class ConfigLoader:
@@ -27,18 +31,57 @@ class ConfigLoader:
         with open(path, "r") as f:
             return yaml.safe_load(f)
 
+    @staticmethod
+    def parse_limit_overrides(items: List[str]) -> Dict[str, Optional[float]]:
+        """Parse KEY=VALUE budget overrides (e.g. "rerank.latency_ms=500").
+
+        A VALUE of none/off/unlimited maps to None, which removes the limit.
+        Raises ValueError on malformed items or unknown scoped keys, so a typo
+        never goes unenforced.
+        """
+        overrides: Dict[str, Optional[float]] = {}
+        for item in items:
+            key, sep, value = item.partition("=")
+            key, value = key.strip(), value.strip()
+            if not sep or not key or not value:
+                raise ValueError(f"Invalid limit {item!r}. Expected KEY=VALUE.")
+            if "." in key:
+                parse_scoped_key(key)
+            if value.lower() in _UNSET_LIMIT_VALUES:
+                overrides[key] = None
+                continue
+            try:
+                overrides[key] = float(value)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid limit {item!r}: {value!r} is not a number or one of {sorted(_UNSET_LIMIT_VALUES)}."
+                ) from None
+        return overrides
+
     @classmethod
     def create_controller(
-        cls, config: Dict[str, Any], budget_overrides: Optional[Dict[str, float]] = None
+        cls,
+        config: Dict[str, Any],
+        budget_overrides: Optional[Dict[str, Optional[float]]] = None,
+        replace_limits: bool = False,
     ) -> RAGtuneController:
+        """Build a controller from a config dict.
+
+        budget_overrides are applied on top of the config's limits (a None
+        value removes that limit). With replace_limits, the config's limits
+        are discarded and only budget_overrides apply.
+        """
         pipeline_conf = config.get("pipeline", {})
         components_conf = pipeline_conf.get("components", {})
         budget_conf = pipeline_conf.get("budget", {})
         feedback_conf = pipeline_conf.get("feedback")
 
-        limits = budget_conf.get("limits", {})
-        if budget_overrides:
-            limits.update(budget_overrides)
+        limits = {} if replace_limits else dict(budget_conf.get("limits", {}))
+        for key, value in (budget_overrides or {}).items():
+            if value is None:
+                limits.pop(key, None)
+            else:
+                limits[key] = value
 
         budget = CostBudget(limits=limits)
 
@@ -134,7 +177,10 @@ class ConfigLoader:
 
     @classmethod
     def create_controllers_from_env(
-        cls, retriever: Any = None
+        cls,
+        retriever: Any = None,
+        budget_overrides: Optional[Dict[str, Optional[float]]] = None,
+        replace_limits: bool = False,
     ) -> List[Tuple[str, RAGtuneController]]:
         """
         Build a list of (name, controller) from SCENARIOS env var or defaults.
@@ -145,6 +191,9 @@ class ConfigLoader:
 
         Defaults (7 scenarios): BM25 baseline + 6 CrossEncoder variants
         (tight/medium/loose x baseline/similarity estimators).
+
+        budget_overrides / replace_limits apply to every scenario, as in
+        create_controller().
         """
         raw = os.environ.get("SCENARIOS", "")
         if raw:
@@ -164,7 +213,9 @@ class ConfigLoader:
 
             # Wrap into full config
             full_cfg = {"pipeline": pipeline_cfg}
-            controller = cls.create_controller(full_cfg)
+            controller = cls.create_controller(
+                full_cfg, budget_overrides=budget_overrides, replace_limits=replace_limits
+            )
             results.append((name, controller))
 
         return results
