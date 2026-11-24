@@ -60,6 +60,7 @@ class LiteLLMClient:
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         usage: Optional[UsageTracker] = None,
         agent: str = "llm",
         retry_wait_s: float = 5.0,
@@ -69,6 +70,7 @@ class LiteLLMClient:
         self.api_base = api_base
         self.api_key = api_key
         self.timeout = timeout
+        self.max_tokens = max_tokens  # caps runaway generations (useful for local models)
         self.usage = usage
         self.agent = agent
         self.retry_wait_s = retry_wait_s
@@ -77,7 +79,7 @@ class LiteLLMClient:
         import litellm
 
         kwargs = dict(model=self.model, messages=messages, temperature=self.temperature)
-        for k in ("api_base", "api_key", "timeout"):
+        for k in ("api_base", "api_key", "timeout", "max_tokens"):
             if getattr(self, k) is not None:
                 kwargs[k] = getattr(self, k)
         if tools:

@@ -25,7 +25,7 @@ def test_parses_tool_calls_and_records_usage(monkeypatch):
     usage = UsageTracker()
     msg = LiteLLMClient("m", usage=usage, agent="analysis").complete([{"role": "user", "content": "q"}], tools=[{}])
     assert msg.content == "" and msg.tool_calls[0].name == "bm25_retrieve"
-    assert seen["tools"] == [{}] and "api_base" not in seen
+    assert seen["tools"] == [{}] and "api_base" not in seen and "max_tokens" not in seen
     assert usage.stats["analysis"]["calls"] == 1 and usage.total_tokens() == 15
 
 
@@ -41,3 +41,10 @@ def test_retries_once(monkeypatch):
     monkeypatch.setattr(litellm, "completion", flaky)
     assert LiteLLMClient("m", retry_wait_s=0).complete([]).content == "hi"
     assert len(attempts) == 2
+
+
+def test_max_tokens_and_timeout_forwarded(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(litellm, "completion", lambda **kw: seen.update(kw) or _response())
+    LiteLLMClient("m", max_tokens=256, timeout=30).complete([])
+    assert seen["max_tokens"] == 256 and seen["timeout"] == 30

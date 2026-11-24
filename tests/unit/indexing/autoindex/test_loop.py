@@ -131,3 +131,33 @@ def test_log_dir_artifacts_and_heldout_eval(toy_data, tmp_path):
     assert json.loads((tmp_path / "result.json").read_text())["best_val"]["recall_at_100"] == pytest.approx(0.6)
     held = ai.evaluate_code(res.best_code, corpus, {"q0": "title0"}, {"q0": {"d0": 1}})
     assert held.recall_at_100 == 1.0
+
+
+def test_llm_failure_skips_iteration_instead_of_crashing(toy_data):
+    corpus, q, qrels = toy_data
+    state = {"n": 0}
+    good = make_code_llm({"H1": TITLE_PROGRAM})
+
+    def respond(messages, tools):
+        if "hypothesis IDEAS" in messages[-1]["content"]:
+            state["n"] += 1
+            if state["n"] == 1:
+                raise TimeoutError("runaway generation")
+        return good.responder(messages, tools)
+
+    res = AutoIndex(_cfg(n_iterations=2, n_candidates=1), make_analysis_llm(), ScriptedLLM(respond)).fit(corpus, q, qrels)
+    assert res.analyses[0].startswith("[iteration skipped: TimeoutError")
+    assert res.best_code.strip() == TITLE_PROGRAM.strip()  # iteration 1 still ran and adopted
+
+
+def test_synthesis_failure_falls_back_to_best_candidate(toy_data):
+    corpus, q, qrels = toy_data
+    base = make_code_llm({"H1": TITLE_PROGRAM, "H2": SPLIT_PROGRAM})
+
+    def respond(messages, tools):
+        if "Combine ALL" in messages[-1]["content"]:
+            raise TimeoutError("synthesis timed out")
+        return base.responder(messages, tools)
+
+    res = AutoIndex(_cfg(), make_analysis_llm(), ScriptedLLM(respond)).fit(corpus, q, qrels)
+    assert res.best_code.strip() == TITLE_PROGRAM.strip()

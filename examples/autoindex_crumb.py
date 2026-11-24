@@ -88,6 +88,8 @@ def main() -> None:
     p.add_argument("--model", required=True, help="litellm model id, used for both agents")
     p.add_argument("--analysis-model", help="override the Analysis Agent model")
     p.add_argument("--api-base", default=None)
+    p.add_argument("--max-tokens", type=int, default=None, help="cap tokens per LLM reply (local models)")
+    p.add_argument("--llm-timeout", type=float, default=None, help="seconds per LLM call")
     p.add_argument("--iterations", type=int, default=5)
     p.add_argument("--candidates", type=int, default=4)
     p.add_argument("--no-analysis", action="store_true", help="ablation: Code Agent sees metrics only")
@@ -112,6 +114,7 @@ def main() -> None:
     usage = UsageTracker()
     api_key = (os.environ.get("LITELLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")) if args.api_base else None
     mk = lambda model, agent: LiteLLMClient(model, temperature=1.0, api_base=args.api_base, api_key=api_key,
+                                             timeout=args.llm_timeout, max_tokens=args.max_tokens,
                                              usage=usage, agent=agent)
     cfg = AutoIndexConfig(n_iterations=args.iterations, n_candidates=args.candidates,
                           use_analysis=not args.no_analysis, use_history=not args.no_history,

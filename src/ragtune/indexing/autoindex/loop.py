@@ -189,17 +189,21 @@ class AutoIndex:
                                                      incumbent.recall_at_10))
             history_text = history.render() if cfg.use_history else ""
 
-            # 2. ANALYZE
-            if analysis_agent is not None:
-                toolbox = AnalysisToolbox(incumbent_index, corpus, val_queries, val_qrels)
-                analysis = analysis_agent.analyze(incumbent, initial, toolbox, incumbent_code,
-                                                  history_text or None).summary
-            else:
-                analysis = prompts.render(prompts.NO_ANALYSIS_SECTION, **incumbent.as_dict())
+            # 2. ANALYZE + 3. SYNTHESIZE. An LLM failure (after the client's own retry)
+            # skips this iteration instead of aborting the run, as in the reference loop.
+            try:
+                if analysis_agent is not None:
+                    toolbox = AnalysisToolbox(incumbent_index, corpus, val_queries, val_qrels)
+                    analysis = analysis_agent.analyze(incumbent, initial, toolbox, incumbent_code,
+                                                      history_text or None).summary
+                else:
+                    analysis = prompts.render(prompts.NO_ANALYSIS_SECTION, **incumbent.as_dict())
+                candidates = code_agent.propose(analysis, incumbent_code, cfg.n_candidates, history_text)
+            except Exception as e:
+                logger.warning("iter %d: LLM stage failed (%s: %s); skipping iteration", t, type(e).__name__, e)
+                analyses.append(f"[iteration skipped: {type(e).__name__}: {e}]")
+                continue
             analyses.append(analysis)
-
-            # 3. SYNTHESIZE
-            candidates = code_agent.propose(analysis, incumbent_code, cfg.n_candidates, history_text)
             for i, c in enumerate(candidates):
                 c.id = f"it{t}-{c.id or f'H{i + 1}'}"
 
@@ -250,8 +254,12 @@ class AutoIndex:
         choice = (best.candidate.id, best.candidate.code, best.summary, False)
 
         if self.config.use_synthesis and len(proven) > 1:
-            merged = code_agent.synthesize(
-                analysis, [(r.candidate, r.delta_recall_100, r.delta_ndcg_10) for r in proven], incumbent_code)
+            try:
+                merged = code_agent.synthesize(
+                    analysis, [(r.candidate, r.delta_recall_100, r.delta_ndcg_10) for r in proven], incumbent_code)
+            except Exception as e:
+                logger.warning("iter %d: synthesis call failed (%s); keeping %s", t, e, best.candidate.id)
+                merged = None
             if merged:
                 synth = self._score_candidate(Candidate(f"it{t}-synth", "synthesis of " +
                                                         ", ".join(r.candidate.id for r in proven), code=merged),
