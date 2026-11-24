@@ -201,9 +201,28 @@ in flags.
 separate axis: `--ce-models` accepts `tiny` / `standard` / `all`, `--monot5-models`
 accepts `standard` / `all`, and both also take an explicit comma-separated list.
 
-**Optimizers** — `bayes` (Optuna TPE), `llm` (GEPA agent), `random` (control).
-Include `random`: at small budgets it is the only way to tell whether the other
-two are beating chance.
+**Optimizers** — `bayes` (Optuna TPE), `llm` (GEPA agent), `reflect`
+(outcome-reflective agent), `random` (control).
+
+| Arm | What the proposer sees | Search state |
+|---|---|---|
+| `bayes` | the objective tuple | surrogate over all trials |
+| `llm` | + trace summaries, per-query NDCG scalar | Pareto pool + mutation/crossover |
+| `reflect` | + per-query ranked lists vs qrels, first-stage ranks | linear trial log |
+| `random` | nothing | none |
+
+`reflect` differs from `llm` in the *feedback channel*, not the search heuristic:
+it is shown which relevant documents were missed and why (beyond depth, never
+reranked, outranked, or never retrieved), so it can attribute a failure to a
+specific knob instead of inferring from one aggregate score. See
+`src/ragtune/tuning/reflect_optimizer.py`.
+
+**Always include `random`**: at small budgets it is the only way to tell whether
+the others beat chance. RAISE (arXiv:2605.30029) found TPE placing 11th of 13
+optimizers on a RAG architecture-search task at a 20-evaluation budget, *below*
+random search, so do not assume `bayes` is the strong baseline. In our 10-cell
+run `bayes` (0.5299) and `random` (0.5304) were statistically
+indistinguishable.
 
 ### 2.3 Presets
 
@@ -229,7 +248,7 @@ grid
   --retrievers      names or a group (default bm25,dph)
   --rerankers       noop,cross-encoder,monot5,llm
   --stages          sanity,baseline,tune
-  --optimizers      bayes,llm,random
+  --optimizers      bayes,llm,reflect,random
   --space           restricted | full   (full adds llm_rewrite/reformir — needs a key)
   --allow-heavy     permit >1M-doc corpora
 
@@ -238,6 +257,22 @@ evaluation
   --budget 30       trials (bayes/random) or iterations (llm) per cell
   --seed 42 / --seeds 42,43,44
   --max-cost 200            cost pruner + hypervolume reference
+  --use-cost-model          objective 2 becomes USD/query instead of documents
+                            reranked, which prices reranker size and scheduler
+                            batch size (both invisible to the document counter)
+  --hv-ref                  hypervolume reference cost; defaults to worst
+                            observed +5%. A reference far above the observed
+                            range degenerates hypervolume to "best NDCG".
+
+llm / reflect optimizers
+  --llm-model / --llm-temperature
+
+  Both route through litellm, so any provider works via the model string. For a
+  frontier Anthropic model use --llm-model anthropic/claude-opus-5
+  --llm-temperature 1.0: Opus 5 accepts only temperature=1 and the proposal path
+  passes temperature unconditionally, so the 0.7 default fails every call. The
+  OPENAI_API_KEY guard only checks that the variable is set, not that the key
+  works or that OpenAI is the provider in use.
   --max-trial-seconds 600   runtime pruner (see the warning in §2.7)
 
 retrieval

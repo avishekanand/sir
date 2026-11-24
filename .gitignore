@@ -28,3 +28,5 @@ indexes/
 benchmark_results/
 bayes_opt_results/
 prompt_opt_results/
+tuning_results/
+tuning_results_llm/

@@ -738,7 +738,7 @@ def stage_baseline(pt, dataset: str, retriever: str, eval_ds, args, bench: Bench
                 "reranker": label,
                 "seed": args.seed,
                 "ndcg_at_10": round(result.objectives.ndcg_at_10, 4),
-                "mean_rerank_docs": round(result.objectives.rerank_docs, 2),
+                "mean_rerank_docs": round(result.objectives.rerank_docs, 6),
                 "mean_latency_ms": round(result.objectives.latency_ms, 1),
                 "n_queries": result.objectives.queries_evaluated,
                 "seconds": round(time.time() - t0, 1),
@@ -831,6 +831,8 @@ def run_bayes(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) ->
         pareto_warmup_trials=max(10, args.budget // 3),
         output_dir=str(cfg_dir),
         search_space_overrides=overrides,
+        use_cost_model=getattr(args, "use_cost_model", False),
+        dataset_name=dataset,
     )
 
     t0 = time.time()
@@ -849,7 +851,8 @@ def run_bayes(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) ->
             "dataset": dataset, "retriever": retriever, "optimizer": "bayes",
             "seed": args.seed, "iteration": trial.number,
             "ndcg_at_10": round(trial.values[0], 4),
-            "mean_rerank_docs": round(trial.values[1], 2),
+            # 6dp: with --use-cost-model this column is USD/query (~1e-6).
+            "mean_rerank_docs": round(trial.values[1], 6),
             "on_pareto": trial.number in pareto_numbers,
             "wall_seconds": round(elapsed, 1),
         }
@@ -865,7 +868,7 @@ def run_bayes(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) ->
     return rows
 
 
-def run_llm(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -> List[Dict[str, Any]]:
+def run_llm(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path, label: str = "llm") -> List[Dict[str, Any]]:
     from ragtune.tuning.llm_optimizer import (
         LLMAgentOptimizer,
         LLMOptimizerConfig,
@@ -873,10 +876,15 @@ def run_llm(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -> L
     )
 
     overrides = search_space_overrides(args)
-    cfg_dir = out_dir / "pareto_configs" / f"{dataset}_{retriever}_llm_s{args.seed}"
+    cfg_dir = out_dir / "pareto_configs" / f"{dataset}_{retriever}_{label}_s{args.seed}"
+
+    cost_model = None
+    if getattr(args, "use_cost_model", False):
+        from ragtune.tuning.cost_model import load_cost_model
+        cost_model = load_cost_model(dataset=dataset)
 
     cfg = LLMOptimizerConfig(
-        name=f"llm-{dataset}-{retriever}-s{args.seed}",
+        name=f"{label}-{dataset}-{retriever}-s{args.seed}",
         llm_model=args.llm_model,
         temperature=args.llm_temperature,
         n_iterations=args.budget,
@@ -890,7 +898,7 @@ def run_llm(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -> L
     )
 
     t0 = time.time()
-    history = LLMAgentOptimizer(config=cfg).run(rt, eval_ds)
+    history = LLMAgentOptimizer(config=cfg, cost_model=cost_model).run(rt, eval_ds)
     elapsed = time.time() - t0
 
     pareto_ids = {id(c) for c in compute_pareto_front(history)}
@@ -899,10 +907,10 @@ def run_llm(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -> L
         if cand.error:
             continue
         row = {
-            "dataset": dataset, "retriever": retriever, "optimizer": "llm",
+            "dataset": dataset, "retriever": retriever, "optimizer": label,
             "seed": args.seed, "iteration": cand.iteration,
             "ndcg_at_10": round(cand.ndcg_at_10, 4),
-            "mean_rerank_docs": round(cand.mean_rerank_docs, 2),
+            "mean_rerank_docs": round(cand.mean_rerank_docs, 6),
             "on_pareto": id(cand) in pareto_ids,
             "wall_seconds": round(elapsed, 1),
             "mutated_module": cand.mutated_module or "",
@@ -914,7 +922,7 @@ def run_llm(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -> L
     screened = sum(1 for c in history if c.error and "screen" in (c.error or ""))
     best = max((r["ndcg_at_10"] for r in rows), default=0.0)
     print(
-        f"  [llm]   {len(rows)} full evals (+{screened} minibatch-screened) in "
+        f"  [{label}] {len(rows)} full evals (+{screened} minibatch-screened) in "
         f"{elapsed:.0f}s — best NDCG@10={best:.4f}, Pareto size {len(pareto_ids)} "
         f"→ {cfg_dir}"
     )
@@ -940,6 +948,13 @@ def run_random(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -
     overrides = search_space_overrides(args)
     space = RAGtuneSearchSpace(**overrides)
 
+    # The control arm must minimise the SAME objective as the arms it controls
+    # for, or the Pareto fronts are not comparable.
+    cost_model = None
+    if getattr(args, "use_cost_model", False):
+        from ragtune.tuning.cost_model import load_cost_model
+        cost_model = load_cost_model(dataset=dataset)
+
     study = optuna.create_study(
         study_name=f"random-{dataset}-{retriever}-s{args.seed}",
         directions=["maximize", "minimize"],
@@ -948,6 +963,7 @@ def run_random(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -
     evaluator = TrialEvaluator(
         dataset=eval_ds,
         n_eval_queries=args.n_queries,
+        cost_model=cost_model,
         pruners=[
             CostPruner(max_mean_rerank_docs=args.max_cost, warmup_steps=3),
             RuntimePruner(max_trial_seconds=args.max_trial_seconds, warmup_steps=3),
@@ -967,7 +983,11 @@ def run_random(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -
             trial.set_user_attr("build_error", str(exc))
             return 0.0, float("inf")
         obj = evaluator.evaluate(controller, trial, space.to_retrieval_overrides(params))
-        return obj.ndcg_at_10, obj.rerank_docs
+        trial.set_user_attr("rerank_docs", obj.rerank_docs)
+        trial.set_user_attr("cost_usd", obj.cost_usd)
+        trial.set_user_attr("flops", obj.flops)
+        cost = obj.cost_usd if cost_model is not None else obj.rerank_docs
+        return obj.ndcg_at_10, cost
 
     t0 = time.time()
     study.optimize(objective, n_trials=args.budget, catch=(Exception,))
@@ -982,7 +1002,8 @@ def run_random(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -
             "dataset": dataset, "retriever": retriever, "optimizer": "random",
             "seed": args.seed, "iteration": trial.number,
             "ndcg_at_10": round(trial.values[0], 4),
-            "mean_rerank_docs": round(trial.values[1], 2),
+            # 6dp: with --use-cost-model this column is USD/query (~1e-6).
+            "mean_rerank_docs": round(trial.values[1], 6),
             "on_pareto": trial.number in pareto_numbers,
             "wall_seconds": round(elapsed, 1),
         }
@@ -995,7 +1016,77 @@ def run_random(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -
     return rows
 
 
-OPTIMIZER_RUNNERS = {"bayes": run_bayes, "llm": run_llm, "random": run_random}
+def run_reflect(dataset: str, retriever: str, rt, eval_ds, args, out_dir: Path) -> List[Dict[str, Any]]:
+    """
+    Outcome-reflective arm: the proposer sees each sampled query's ranked list
+    against the ground-truth labels, plus where the relevant documents sit in
+    the first-stage ranking, and must tie every knob change to a named failure.
+
+    A different feedback channel from the other arms, not a different search
+    heuristic. See src/ragtune/tuning/reflect_optimizer.py.
+    """
+    from ragtune.tuning.reflect_optimizer import ReflectConfig, ReflectOptimizer
+    from ragtune.tuning.llm_optimizer import compute_pareto_front
+
+    overrides = search_space_overrides(args)
+    cfg_dir = out_dir / "pareto_configs" / f"{dataset}_{retriever}_reflect_s{args.seed}"
+    meta = DATASETS[dataset]
+
+    cost_model = None
+    if getattr(args, "use_cost_model", False):
+        from ragtune.tuning.cost_model import load_cost_model
+        cost_model = load_cost_model(dataset=dataset)
+
+    cfg = ReflectConfig(
+        name=f"reflect-{dataset}-{retriever}-s{args.seed}",
+        llm_model=args.llm_model,
+        temperature=args.llm_temperature,
+        n_iterations=args.budget,
+        n_eval_queries=args.n_queries,
+        n_evidence_queries=args.reflect_evidence_queries,
+        seed=args.seed,
+        output_dir=str(cfg_dir),
+        search_space_overrides=overrides,
+        dataset_info=(f"{dataset}: {meta.get('n_docs', 0):,} documents, "
+                      f"evaluating on {args.n_queries} queries."),
+        model_info=(f"First stage: Terrier {retriever} (fixed). "
+                    f"Rerankers available: {', '.join(args.rerankers)}."),
+        baseline_ndcg=getattr(args, "_baseline_ndcg", None),
+        cost_label=("USD per query" if cost_model is not None
+                    else "mean reranked documents per query"),
+    )
+
+    t0 = time.time()
+    history = ReflectOptimizer(config=cfg, cost_model=cost_model).run(rt, eval_ds)
+    elapsed = time.time() - t0
+
+    ok = [c for c in history if not c.error]
+    pareto_ids = {id(c) for c in compute_pareto_front(ok)}
+    rows: List[Dict[str, Any]] = []
+    for cand in ok:
+        row = {
+            "dataset": dataset, "retriever": retriever, "optimizer": "reflect",
+            "seed": args.seed, "iteration": cand.iteration,
+            "ndcg_at_10": round(cand.ndcg_at_10, 4),
+            "mean_rerank_docs": round(cand.mean_rerank_docs, 6),
+            "on_pareto": id(cand) in pareto_ids,
+            "wall_seconds": round(elapsed, 1),
+            "mutated_module": "",
+            "rationale": (cand.rationale or "")[:300],
+        }
+        row.update({f"p_{k}": v for k, v in cand.params.items()})
+        rows.append(row)
+
+    fb = sum(1 for c in history if "random fallback" in (c.rationale or ""))
+    best = max((r["ndcg_at_10"] for r in rows), default=0.0)
+    print(f"  [reflect] {len(rows)} evals ({len(history)-len(ok)} failed, {fb} random "
+          f"fallback) in {elapsed:.0f}s — best NDCG@10={best:.4f}, "
+          f"Pareto size {len(pareto_ids)} -> {cfg_dir}")
+    return rows
+
+
+OPTIMIZER_RUNNERS = {"bayes": run_bayes, "llm": run_llm, "random": run_random,
+                     "reflect": run_reflect}
 
 
 def stage_tune(pt, dataset: str, retriever: str, eval_ds, args, bench: Bench) -> None:
@@ -1007,6 +1098,16 @@ def stage_tune(pt, dataset: str, retriever: str, eval_ds, args, bench: Bench) ->
             continue
         if rt is None:
             rt = make_retriever(pt, retriever, dataset, args.index_dir, args)
+
+        # Best untuned baseline for this cell, so an LLM-driven arm can be told
+        # what it has to beat. None
+        # when --stages omitted baseline; the prompt then drops that sentence.
+        cell_baselines = [
+            r["ndcg_at_10"] for r in bench.baseline
+            if r.get("dataset") == dataset and r.get("retriever") == retriever
+            and not r.get("error")
+        ]
+        args._baseline_ndcg = max(cell_baselines) if cell_baselines else None
 
         runner = OPTIMIZER_RUNNERS[optimizer]
         try:
@@ -1045,14 +1146,75 @@ def _ordered_keys(rows: List[Dict[str, Any]], fields: tuple) -> List[tuple]:
     return seen
 
 
+def hv_reference(args, trials: Optional[List[Dict[str, Any]]] = None) -> float:
+    """
+    Hypervolume reference, in the units of the reported cost axis.
+
+    Derived from the observed costs (worst trial + 5% headroom) unless --hv-ref
+    overrides it. A fixed constant does not work: the reference has to sit just
+    above the costliest config, because anything above it contributes nothing
+    and anything far above it squashes every front flat against the edge, at
+    which point HV degenerates to roughly "best NDCG" and carries no cost
+    information at all. The earlier 1e-3 USD default was 10-1000x above the
+    observed 1e-6..9e-5 range and did exactly that, reporting an identical HV
+    for every arm.
+
+    One reference is used for every arm and cell in a report, or the numbers
+    would not be comparable.
+
+    Note --max-cost cannot serve as the reference: it is in reranked documents
+    and also drives CostPruner, which still sees rerank_docs regardless of which
+    objective is being optimised.
+    """
+    explicit = getattr(args, "hv_ref", None)
+    if explicit:
+        return float(explicit)
+    costs = [
+        float(r["mean_rerank_docs"]) for r in (trials or [])
+        if r.get("mean_rerank_docs") is not None and not r.get("error")
+    ]
+    if costs and max(costs) > 0:
+        return max(costs) * 1.05
+    # Nothing observed yet: fall back to the flag so the legend stays printable.
+    if getattr(args, "use_cost_model", False):
+        return float(getattr(args, "max_cost_usd", 1e-3))
+    return float(args.max_cost)
+
+
 def hypervolume_2d(pairs: List[tuple], ref_cost: float) -> float:
-    """Dominated area for (maximize NDCG, minimize cost)."""
+    """
+    Normalised dominated hypervolume for (maximize NDCG, minimize cost).
+
+    Reference point is (ndcg=0, cost=ref_cost): a front point (n, c) dominates
+    the box [0, n] x [c, ref_cost]. Sweeping cost upward, the union area is
+
+        sum_i  n_i * (c_{i+1} - c_i)      with c_{k+1} = ref_cost
+
+    The result is divided by ref_cost, so it is dimensionless and bounded by
+    max(ndcg) regardless of whether the cost axis is reranked documents or USD.
+    That matters because HV otherwise carries the cost unit: switching objective
+    2 from documents (~10-100) to USD (~1e-6) rescaled it by ~1e6 and every arm
+    reported 0.00.
+
+    Previously this integrated from cost=0 rather than to ref_cost, crediting
+    the region cheaper than the cheapest point — which nothing achieves — and
+    ignoring ref_cost except as a filter.
+    """
+    if ref_cost <= 0:
+        return 0.0
     pts = sorted([(n, c) for n, c in pairs if c < ref_cost and n > 0], key=lambda p: p[1])
-    hv, prev = 0.0, 0.0
-    for ndcg, cost in pts:
-        hv += ndcg * (cost - prev)
-        prev = cost
-    return hv
+    if not pts:
+        return 0.0
+    # Running max, not each point's own NDCG: over [c_i, c_{i+1}) the dominating
+    # height is the best NDCG among all points at or below c_i. These coincide
+    # on a clean front, but a dominated point in the input would otherwise
+    # shrink the area instead of leaving it unchanged.
+    hv, best = 0.0, 0.0
+    for i, (ndcg, cost) in enumerate(pts):
+        best = max(best, ndcg)
+        upper = pts[i + 1][1] if i + 1 < len(pts) else ref_cost
+        hv += best * (upper - cost)
+    return hv / ref_cost
 
 
 def report(bench: Bench, args) -> None:
@@ -1131,17 +1293,30 @@ def report(bench: Bench, args) -> None:
             base_rows = [r["ndcg_at_10"] for r in bench.baseline
                          if r["dataset"] == ds and r["retriever"] == rtv and not r.get("error")]
             base = max(base_rows, default=0.0)
-            front = [(r["ndcg_at_10"], r["mean_rerank_docs"]) for r in rows if r["on_pareto"]]
-            hv = hypervolume_2d(front, args.max_cost)
+            # Per seed, then average — pooling seeds would mix fronts measured
+            # on different query subsamples, and `best NDCG` above is per-seed.
+            _ref = hv_reference(args, bench.trials)
+            per_seed_fronts = [
+                [(r["ndcg_at_10"], r["mean_rerank_docs"])
+                 for r in rows if r.get("seed", args.seed) == sd and r["on_pareto"]]
+                for sd in seeds
+            ]
+            hv = _mean([hypervolume_2d(f, _ref) for f in per_seed_fronts])
+            front_size = _mean([float(len(f)) for f in per_seed_fronts])
             wall = max(r["wall_seconds"] for r in rows)
             emit(
                 f"  {ds:<14} {rtv:<14} {opt:<9} {best:>10.4f} {spread:>7.4f} "
-                f"{best - base:>+9.4f} {hv:>8.2f} {len(front):>8} {len(seeds):>6} {wall:>8.0f}"
+                f"{best - base:>+9.4f} {hv:>8.4f} {front_size:>8.1f} {len(seeds):>6} {wall:>8.0f}"
             )
         emit()
         emit("  best NDCG = mean over seeds of each seed's best trial; +/- is the stdev over seeds.")
         emit("  'vs base' = that mean minus the best fixed-config baseline for the same cell.")
-        emit(f"  HV = dominated hypervolume of the Pareto front (ref cost {args.max_cost:.0f} docs); higher is better.")
+        _ref = hv_reference(args, bench.trials)
+        _unit = "USD/query" if getattr(args, "use_cost_model", False) else "docs"
+        _src = "--hv-ref" if getattr(args, "hv_ref", None) else "worst observed trial +5%"
+        emit(f"  HV = normalised dominated hypervolume, per seed then averaged "
+             f"(ref cost {_ref:.3g} {_unit}, from {_src}); dimensionless, higher is better.")
+        emit("  |front| = mean per-seed Pareto front size.")
         if len(args.seed_list) < 2:
             emit("  NOTE: single seed — differences under ~0.02 NDCG are not distinguishable "
                  "from noise. Re-run with --seeds 42,43,44.")
@@ -1167,7 +1342,7 @@ def make_plots(bench: Bench, args) -> None:
 
     out = Path(args.out_dir) / "plots"
     out.mkdir(parents=True, exist_ok=True)
-    colors = {"bayes": "#B71C1C", "llm": "#1565C0"}
+    colors = {"bayes": "#B71C1C", "llm": "#1565C0", "reflect": "#EF6C00", "random": "#757575"}
 
     cells = sorted({(r["dataset"], r["retriever"]) for r in bench.trials})
     for ds, rtv in cells:
@@ -1351,8 +1526,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--stages", default="sanity,baseline,tune",
                    help="comma-separated subset of sanity,baseline,tune")
     g.add_argument("--optimizers", default="bayes",
-                   help="comma-separated subset of bayes,llm,random "
-                        "(llm needs OPENAI_API_KEY; random is the control arm)")
+                   help="comma-separated subset of bayes,llm,reflect,random "
+                        "(llm = GEPA, reflect = outcome-reflective arm; both need an "
+                        "API key. random is the control arm)")
+    g.add_argument("--use-cost-model", action="store_true",
+                   help="objective 2 becomes USD/query (prices reranker size, "
+                        "scheduler batch size and LLM calls) instead of mean "
+                        "reranked docs. Needs config/cost_model.yaml calibrated "
+                        "for this device — see scripts/calibrate_cost_model.py")
     g.add_argument("--space", default="restricted", choices=["restricted", "full"],
                    help="'full' adds llm_rewrite/reformir reformulators, the reformir "
                         "estimator and reformir-convergence feedback — all need an API key")
@@ -1368,6 +1549,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                         "Repetition is the only way to tell a real gap from NDCG noise")
     e.add_argument("--max-cost", type=float, default=200.0,
                    help="cost pruner threshold and hypervolume reference (mean rerank docs)")
+    e.add_argument("--hv-ref", type=float, default=None,
+                   help="hypervolume reference cost. Default: worst observed "
+                        "trial +5%%, which keeps HV sensitive to the cost axis. "
+                        "A reference far above the observed range flattens every "
+                        "front and makes HV ~= best NDCG")
+    e.add_argument("--max-cost-usd", type=float, default=1e-3,
+                   help="hypervolume reference when --use-cost-model is set, in "
+                        "USD/query (default 1e-3 = $1 per 1k queries). Must "
+                        "exceed the costliest config or it is excluded from HV")
     e.add_argument("--max-trial-seconds", type=float, default=600.0,
                    help="runtime pruner: abort a trial projected to exceed this")
 
@@ -1398,6 +1588,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     lo = p.add_argument_group("llm optimizer")
     lo.add_argument("--llm-model", default="gpt-4o-mini")
     lo.add_argument("--llm-temperature", type=float, default=0.7)
+    lo.add_argument("--reflect-evidence-queries", type=int, default=6,
+                    help="queries whose ranked list vs ground truth is shown to "
+                         "the reflect arm each proposal")
     lo.add_argument("--gepa-startup", type=int, default=3)
     lo.add_argument("--gepa-minibatch", type=int, default=10)
     lo.add_argument("--gepa-merge-every", type=int, default=10)
@@ -1498,7 +1691,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     args.retrievers = split(args.retrievers, RETRIEVERS, "retriever", RETRIEVER_GROUPS)
     args.rerankers = split(args.rerankers, RERANKERS, "reranker")
     args.stages = split(args.stages, ["sanity", "baseline", "tune"], "stage")
-    args.optimizers = split(args.optimizers, ["bayes", "llm", "random"], "optimizer")
+    args.optimizers = split(
+        args.optimizers,
+        ["bayes", "llm", "reflect", "random"],
+        "optimizer")
 
     # Model menus accept either a menu name or an explicit comma list.
     args.ce_models = CE_MODEL_MENU.get(args.ce_models, None) or [
@@ -1550,7 +1746,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print_plan(args)
         return 0
 
-    needs_key = ("llm" in args.optimizers or args.space == "full" or "llm" in args.rerankers)
+    needs_key = ("llm" in args.optimizers or "reflect" in args.optimizers
+                 or args.space == "full" or "llm" in args.rerankers)
     if "tune" in args.stages and needs_key and not os.environ.get("OPENAI_API_KEY"):
         print("ERROR: --optimizers llm / --space full / --rerankers llm all require "
               "OPENAI_API_KEY in the environment.", file=sys.stderr)
