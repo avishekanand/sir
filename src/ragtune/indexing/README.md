@@ -137,6 +137,33 @@ See [`configs/bright_indexing.yaml`](configs/bright_indexing.yaml) for all six b
 
 ---
 
+## AutoIndex: learned representation programs (`autoindex/`)
+
+[AutoIndex](https://arxiv.org/abs/2607.18603) keeps BM25 fixed and learns the *document side*: a Python
+program that turns raw documents into the chunks BM25 indexes. Two LLM agents search over programs
+using validation Recall@100. An Analysis Agent diagnoses failures with read-only tools, and a Code
+Agent proposes candidates. The learned program runs once at build time, with no LLM calls at
+serving time. Spec: [`specs/spec-autoindex.md`](../../../specs/spec-autoindex.md).
+
+```python
+from ragtune.indexing.autoindex import AutoIndex, AutoIndexConfig, LiteLLMClient
+
+ai = AutoIndex(AutoIndexConfig(n_iterations=5, n_candidates=4),
+               analysis_llm=LiteLLMClient("openai/gpt-4o"), code_llm=LiteLLMClient("openai/gpt-4o"))
+result = ai.fit(corpus, val_queries, qrels, n_eval_queries=len(eval_queries))   # validation only
+held_out = ai.evaluate_code(result.best_code, corpus, eval_queries, qrels)
+
+# Use the learned program like any other indexer:
+indexer = IndexFactory.create("autoindex", program_code=result.best_code)
+indexer.build_from_corpus(corpus, index_path="indexes/my-autoindex")
+```
+
+End to end on CRUMB: `python examples/autoindex_crumb.py --task theorem_retrieval --model <litellm-id>`.
+`pip install -e '.[autoindex]'` adds `bm25s` for speed; without it a pure-Python BM25 gives the same scores.
+**AutoIndex runs LLM-written code in-process.** The AST screen is a guardrail, not a sandbox.
+
+---
+
 ## Adding a new indexer
 
 1. Subclass `BaseIndexer` (or `DenseIndexer` if it's vector-based — you only need `_save_vectors`/`exists`/`load`/`_search_vectors`).

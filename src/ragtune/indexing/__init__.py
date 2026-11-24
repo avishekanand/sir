@@ -12,6 +12,7 @@ Registered keys
   "numpy"      → NumpyIndexer       (dense, sentence-transformers + plain .npy, no faiss)
   "flex"       → FlexIndexer        (dense, pyterrier_dr: Qwen3, BGE-M3, ...)
   "pyserini"   → PyseriniIndexer    (stub, not yet implemented)
+  "autoindex"  → AutoIndexBM25Indexer (sparse BM25 over a learned representation program)
 
 All indexers expose search(query, top_k, index_path) for exact top_k retrieval
 (see ragtune.indexing.base.SearchResult).
@@ -23,6 +24,7 @@ from ragtune.indexing.factory import IndexFactory
 # Sparse
 from ragtune.indexing import pyterrier_indexer   # noqa: F401  registers "pyterrier"
 from ragtune.indexing import pyserini_indexer    # noqa: F401  registers "pyserini"
+from ragtune.indexing.autoindex import indexer as _autoindex_indexer  # noqa: F401  registers "autoindex"
 
 # Dense
 from ragtune.indexing import dense_indexer       # noqa: F401  registers "faiss", "numpy"
@@ -38,6 +40,7 @@ from ragtune.indexing.dense_indexer import (
 )
 from ragtune.indexing.flex_indexer import FlexIndexer
 from ragtune.indexing.pyserini_indexer import PyseriniIndexer
+from ragtune.indexing.autoindex.indexer import AutoIndexBM25Indexer
 
 __all__ = [
     "BaseIndexer",
@@ -51,4 +54,5 @@ __all__ = [
     "NumpyIndexData",
     "FlexIndexer",
     "PyseriniIndexer",
+    "AutoIndexBM25Indexer",
 ]
