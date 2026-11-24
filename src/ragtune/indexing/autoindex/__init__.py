@@ -18,6 +18,8 @@ from ragtune.indexing.autoindex.program import (
 )
 from ragtune.indexing.autoindex.bm25 import ChunkBM25Index, DocHit, Tokenizer
 from ragtune.indexing.autoindex.metrics import EvalSummary, QueryOutcome, evaluate_index
+from ragtune.indexing.autoindex.llm import LiteLLMClient, LLMClient, UsageTracker
+from ragtune.indexing.autoindex.loop import AutoIndex, AutoIndexConfig, AutoIndexResult
 
 __all__ = [
     "IDENTITY_PROGRAM_CODE",
@@ -35,4 +37,10 @@ __all__ = [
     "EvalSummary",
     "QueryOutcome",
     "evaluate_index",
+    "LiteLLMClient",
+    "LLMClient",
+    "UsageTracker",
+    "AutoIndex",
+    "AutoIndexConfig",
+    "AutoIndexResult",
 ]
