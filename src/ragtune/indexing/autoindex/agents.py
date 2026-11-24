@@ -226,6 +226,8 @@ class CodeAgent:
     def __init__(self, llm: LLMClient, ctx: PromptContext, max_workers: int = 4):
         self.llm = llm
         self.system = ctx.fill(prompts.CODE_SYSTEM)
+        if max_workers < 1:
+            raise ValueError("max_workers must be >= 1")
         self.max_workers = max_workers
 
     def _ask(self, user: str) -> str:

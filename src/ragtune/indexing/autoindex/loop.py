@@ -46,6 +46,8 @@ class AutoIndexConfig:
 
     n_iterations: int = 5
     n_candidates: int = 4
+    code_concurrency: Optional[int] = None  # parallel code-writing calls; None = n_candidates (as in the paper).
+                                            # Use 1 for single-slot servers such as a default Ollama.
     improvement_threshold: float = 1e-5     # "proven" ⇔ ΔR@100 ≥ threshold
     analysis_max_turns: int = 5
     min_tool_turns: int = 3
@@ -175,7 +177,7 @@ class AutoIndex:
                             min_tool_turns=cfg.min_tool_turns)
         analysis_agent = (AnalysisAgent(self.analysis_llm, ctx, max_turns=cfg.analysis_max_turns,
                                         min_tool_turns=cfg.min_tool_turns) if cfg.use_analysis else None)
-        code_agent = CodeAgent(self.code_llm, ctx, max_workers=cfg.n_candidates)
+        code_agent = CodeAgent(self.code_llm, ctx, max_workers=cfg.code_concurrency or cfg.n_candidates)
         history = SearchHistory()
         analyses: List[str] = []
 

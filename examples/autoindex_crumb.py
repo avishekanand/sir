@@ -89,6 +89,9 @@ def main() -> None:
     p.add_argument("--analysis-model", help="override the Analysis Agent model")
     p.add_argument("--api-base", default=None)
     p.add_argument("--max-tokens", type=int, default=None, help="cap tokens per LLM reply (local models)")
+    p.add_argument("--num-ctx", type=int, default=None, help="Ollama context window (its default is small)")
+    p.add_argument("--code-concurrency", type=int, default=None,
+                   help="parallel code-writing calls (default: --candidates; use 1 for Ollama)")
     p.add_argument("--llm-timeout", type=float, default=None, help="seconds per LLM call")
     p.add_argument("--iterations", type=int, default=5)
     p.add_argument("--candidates", type=int, default=4)
@@ -115,8 +118,10 @@ def main() -> None:
     api_key = (os.environ.get("LITELLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")) if args.api_base else None
     mk = lambda model, agent: LiteLLMClient(model, temperature=1.0, api_base=args.api_base, api_key=api_key,
                                              timeout=args.llm_timeout, max_tokens=args.max_tokens,
+                                             extra_params={"num_ctx": args.num_ctx} if args.num_ctx else None,
                                              usage=usage, agent=agent)
     cfg = AutoIndexConfig(n_iterations=args.iterations, n_candidates=args.candidates,
+                          code_concurrency=args.code_concurrency,
                           use_analysis=not args.no_analysis, use_history=not args.no_history,
                           corpus_description=CORPUS_DESCRIPTIONS[args.task], log_dir=str(out))
     ai = AutoIndex(cfg, analysis_llm=mk(args.analysis_model or args.model, "analysis"),

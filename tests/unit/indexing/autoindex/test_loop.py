@@ -161,3 +161,19 @@ def test_synthesis_failure_falls_back_to_best_candidate(toy_data):
 
     res = AutoIndex(_cfg(), make_analysis_llm(), ScriptedLLM(respond)).fit(corpus, q, qrels)
     assert res.best_code.strip() == TITLE_PROGRAM.strip()
+
+
+def test_code_concurrency_config_reaches_code_agent(toy_data, monkeypatch):
+    import ragtune.indexing.autoindex.loop as loop_mod
+
+    seen = {}
+    real = loop_mod.CodeAgent
+
+    def spy(llm, ctx, max_workers):
+        seen["max_workers"] = max_workers
+        return real(llm, ctx, max_workers=max_workers)
+
+    monkeypatch.setattr(loop_mod, "CodeAgent", spy)
+    corpus, q, qrels = toy_data
+    AutoIndex(_cfg(code_concurrency=1), make_analysis_llm(), make_code_llm({"H1": TITLE_PROGRAM})).fit(corpus, q, qrels)
+    assert seen["max_workers"] == 1

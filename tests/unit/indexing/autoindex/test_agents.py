@@ -96,3 +96,31 @@ def test_code_agent_propose_two_phase():
 
 def test_code_agent_no_ideas_returns_empty():
     assert CodeAgent(ScriptedLLM(lambda m, t: LLMMessage("nothing")), CTX).propose("", "c", 4) == []
+
+
+def test_code_agent_respects_concurrency_limit():
+    import threading
+    import time
+
+    lock, state = threading.Lock(), {"active": 0, "peak": 0}
+    base = make_code_llm({"H1": TITLE_PROGRAM, "H2": TITLE_PROGRAM, "H3": TITLE_PROGRAM})
+
+    def respond(messages, tools):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.05)
+        with lock:
+            state["active"] -= 1
+        return base.responder(messages, tools)
+
+    cands = CodeAgent(ScriptedLLM(respond), CTX, max_workers=1).propose("", "c", n=3)
+    assert len(cands) == 3 and all(c.code for c in cands)
+    assert state["peak"] == 1
+
+
+def test_code_agent_rejects_zero_workers():
+    import pytest
+
+    with pytest.raises(ValueError):
+        CodeAgent(make_code_llm({}), CTX, max_workers=0)

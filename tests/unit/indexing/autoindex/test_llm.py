@@ -48,3 +48,10 @@ def test_max_tokens_and_timeout_forwarded(monkeypatch):
     monkeypatch.setattr(litellm, "completion", lambda **kw: seen.update(kw) or _response())
     LiteLLMClient("m", max_tokens=256, timeout=30).complete([])
     assert seen["max_tokens"] == 256 and seen["timeout"] == 30
+
+
+def test_extra_params_forwarded(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(litellm, "completion", lambda **kw: seen.update(kw) or _response())
+    LiteLLMClient("ollama_chat/m", extra_params={"num_ctx": 32768}).complete([])
+    assert seen["num_ctx"] == 32768
