@@ -275,7 +275,8 @@ def _good_params() -> Dict[str, Any]:
 def _make_eval_result(ndcg=0.5, cost=20.0, n_queries=5) -> EvalResult:
     from ragtune.tuning.evaluator import TrialObjectives
     return EvalResult(
-        objectives=TrialObjectives(ndcg_at_10=ndcg, rerank_docs=cost, latency_ms=100.0, queries_evaluated=n_queries),
+        objectives=TrialObjectives(ndcg_at_10=ndcg, cost_usd=0.0, rerank_docs=cost,
+                                   latency_ms=100.0, queries_evaluated=n_queries),
         trace=TraceAggregate(
             avg_pool_size=30.0,
             avg_pct_pool_reranked=0.6,
@@ -535,3 +536,181 @@ def test_user_message_includes_diagnosis_hints():
     # than the exact threshold, which is a tuning constant free to change.
     assert "Diagnostic hints for [RERANKER]" in msg
     assert "pct_pool_reranked" in msg
+
+
+# ── cost axis (regression: arms must share objective 2) ───────────────────────
+
+def test_gepa_reports_cost_usd_when_a_cost_model_is_supplied():
+    """
+    Every arm compared against another must minimise the same objective 2, or
+    the Pareto fronts differ in units and are not comparable. run_random once
+    hardcoded rerank_docs while bayes/agenthpo used USD; this pins GEPA's half.
+    """
+    opt = _make_optimizer()
+    opt.cost_model = MagicMock()
+
+    with (
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_full") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch") as mock_mini,
+        patch.object(opt, "_propose", return_value=(_good_params(), "r")),
+    ):
+        from ragtune.tuning.evaluator import TrialObjectives
+        mock_eval.return_value = EvalResult(
+            objectives=TrialObjectives(
+                ndcg_at_10=0.5, cost_usd=0.000123, rerank_docs=42.0,
+                latency_ms=100.0, queries_evaluated=2,
+            ),
+            trace=TraceAggregate(30.0, 0.6, 0.1, 0.0, 0.2, 0.0),
+            query_ndcg={"q0": 0.5},
+        )
+        fake_ds = MagicMock(); fake_ds.queries = [MagicMock()]
+        history = opt.run(MagicMock(), fake_ds)
+
+    assert mock_eval.called
+    # USD, not reranked documents
+    assert all(c.mean_rerank_docs == 0.000123 for c in history if not c.error)
+
+
+def test_gepa_reports_rerank_docs_when_no_cost_model():
+    opt = _make_optimizer()
+    assert opt.cost_model is None
+
+    with (
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_full") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch") as mock_mini,
+        patch.object(opt, "_propose", return_value=(_good_params(), "r")),
+    ):
+        mock_eval.return_value = _make_eval_result(ndcg=0.5, cost=42.0)
+        fake_ds = MagicMock(); fake_ds.queries = [MagicMock()]
+        history = opt.run(MagicMock(), fake_ds)
+
+    assert all(c.mean_rerank_docs == 42.0 for c in history if not c.error)
+
+
+# ── free-mutation ablation (gepafree arm) ─────────────────────────────────────
+
+def test_free_mutation_lets_the_proposer_change_any_knob():
+    """
+    The gepafree ablation keeps GEPA's reflective context but drops the
+    one-module-per-iteration restriction. Isolates per-module mutation as the
+    single difference from the agenthpo arm.
+    """
+    from ragtune.tuning.llm_optimizer import FREE_MODULE, _MODULE_PARAM_KEYS
+    opt = _make_optimizer()
+    opt.config.free_mutation = True
+    sysp = opt._build_system_prompt(FREE_MODULE)
+    assert "change ANY parameter" in sysp
+    assert "module only" not in sysp
+    # the union covers strictly more knobs than any single module
+    assert len(_MODULE_PARAM_KEYS[FREE_MODULE]) > max(
+        len(v) for k, v in _MODULE_PARAM_KEYS.items() if k != FREE_MODULE)
+
+
+def test_per_module_restriction_is_the_default():
+    from ragtune.tuning.llm_optimizer import LLMOptimizerConfig
+    assert LLMOptimizerConfig(name="t").free_mutation is False
+    opt = _make_optimizer()
+    sysp = opt._build_system_prompt("reranker")
+    assert "module only" in sysp
+    assert "change ANY parameter" not in sysp
+
+
+def test_free_mutation_shows_hints_for_every_module():
+    from ragtune.tuning.llm_optimizer import FREE_MODULE, _MODULE_CYCLE
+    opt = _make_optimizer()
+    opt.config.free_mutation = True
+    c = _make_candidate(iteration=1, ndcg=0.6, cost=20.0)
+    msg = opt._build_user_message([c], compute_pareto_front([c]), c, FREE_MODULE)
+    for mod in _MODULE_CYCLE:
+        assert f"[{mod}]" in msg
+    assert "coordinated changes" in msg
+
+
+def test_per_module_shows_only_that_module_hints():
+    opt = _make_optimizer()
+    c = _make_candidate(iteration=1, ndcg=0.6, cost=20.0)
+    msg = opt._build_user_message([c], compute_pareto_front([c]), c, "reranker")
+    assert "Diagnostic hints for [RERANKER]" in msg
+    assert "mutate ONLY the [RERANKER]" in msg
+
+
+def test_free_mutation_run_uses_the_free_target():
+    """run() must stop cycling modules when free_mutation is set."""
+    from ragtune.tuning.llm_optimizer import FREE_MODULE
+    opt = _make_optimizer()
+    opt.config.free_mutation = True
+    opt.config.n_startup = 0
+    seen = []
+
+    def spy(history, pool, parent, target_module):
+        seen.append(target_module)
+        return _good_params(), "r"
+
+    with (
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_full") as mock_eval,
+        patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch", return_value=0.9),
+        patch.object(opt, "_propose", side_effect=spy),
+    ):
+        mock_eval.return_value = _make_eval_result()
+        fake_ds = MagicMock(); fake_ds.queries = [MagicMock()]
+        opt.run(MagicMock(), fake_ds)
+
+    assert seen, "proposer was never called"
+    assert set(seen) == {FREE_MODULE}
+
+
+# ── calibrated minibatch screen ───────────────────────────────────────────────
+
+def test_screen_gate_scales_with_the_parent_standard_error():
+    """
+    The old gate was a hardcoded 0.02 NDCG delta on 10 queries, ~4x inside the
+    sampling noise, so it discarded candidates on coin flips. It is now
+    k * SE(parent on the minibatch).
+    """
+    import statistics as st
+    opt = _make_optimizer()
+    opt.config.screen_k_sigma = 2.0
+    qids = {f"q{i}" for i in range(10)}
+    spread = {f"q{i}": v for i, v in enumerate([0.0, 1.0] * 5)}   # high variance
+    tight = {f"q{i}": 0.5 for i in range(10)}                      # zero variance
+
+    parent_hi = _make_candidate(ndcg=0.5, cost=20.0)
+    parent_hi.query_ndcg = spread
+    parent_lo = _make_candidate(ndcg=0.5, cost=20.0)
+    parent_lo.query_ndcg = tight
+
+    def gate_for(parent):
+        # child scores exactly at the parent mean: must never be rejected
+        with patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch",
+                   return_value=0.5), \
+             patch.object(type(opt.search_space), "build_controller",
+                          return_value=MagicMock()), \
+             patch("ragtune.tuning.llm_optimizer.evaluate_controller_full") as mf:
+            mf.return_value = _make_eval_result()
+            c = opt._minibatch_screen_then_eval(
+                1, _good_params(), MagicMock(), MagicMock(), qids, parent,
+                "r", "reranker")
+        return c
+
+    assert gate_for(parent_hi).error is None, "tie rejected under high variance"
+    assert gate_for(parent_lo).error is None, "tie rejected under zero variance"
+    # a genuinely worse child is still rejected
+    with patch("ragtune.tuning.llm_optimizer.evaluate_controller_minibatch",
+               return_value=0.0), \
+         patch.object(type(opt.search_space), "build_controller",
+                      return_value=MagicMock()):
+        c = opt._minibatch_screen_then_eval(
+            1, _good_params(), MagicMock(), MagicMock(), qids, parent_lo,
+            "r", "reranker")
+    assert c.error is not None and "screen" in c.error
+
+
+def test_screen_gate_has_a_floor_for_zero_variance_parents():
+    opt = _make_optimizer()
+    assert opt.config.screen_min_gate > 0
+
+
+def test_gepa_history_budget_matches_the_other_llm_arms():
+    """agenthpo and reflect show the full history; GEPA must not show less."""
+    from ragtune.tuning.llm_optimizer import LLMOptimizerConfig
+    assert LLMOptimizerConfig(name="t").max_history_in_prompt >= 30

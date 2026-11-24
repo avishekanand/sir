@@ -100,6 +100,10 @@ class EvalResult:
     objectives: TrialObjectives
     trace: TraceAggregate
     query_ndcg: Dict[str, float]   # query_id → NDCG@10 (GEPA instance-wise tracking)
+    # query_id -> ranked list detail, only for qids in `capture_qids`. Used by
+    # the `reflect` arm to show the proposer what actually came back per query.
+    # Empty for every other arm, so nothing else pays the memory.
+    per_query: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -227,10 +231,16 @@ def evaluate_controller_full(
     dataset: EvalDataset,
     n_eval_queries: int,
     retrieval_overrides: Optional[Dict[str, Any]] = None,
+    cost_model: Optional[Any] = None,
+    capture_qids: Optional[Set[str]] = None,
 ) -> EvalResult:
     """
     Full evaluation: run controller on n_eval_queries, return per-query NDCG.
     Used for pool updates and final Pareto construction.
+
+    cost_model — optional CostModel. When given, objectives carry cost_usd and
+    flops; when None, cost_usd is 0.0 and callers must keep using rerank_docs
+    as objective 2.
     """
     _apply_retrieval_overrides(retrieval_overrides)
 
@@ -239,6 +249,10 @@ def evaluate_controller_full(
     latencies_ms: List[float] = []
     per_query_traces: List[Dict[str, Any]] = []
     query_ndcg: Dict[str, float] = {}
+    usd_costs: List[float] = []
+    flops_vals: List[float] = []
+    any_api_model = False
+    per_query: Dict[str, List[Dict[str, Any]]] = {}
     n_total = min(n_eval_queries, len(dataset.queries))
 
     for eq in dataset.iter_queries(limit=n_total):
@@ -249,6 +263,7 @@ def evaluate_controller_full(
             ndcg_scores.append(0.0)
             rerank_costs.append(0.0)
             latencies_ms.append(0.0)
+            usd_costs.append(0.0)
             query_ndcg[eq.query_id] = 0.0
             continue
 
@@ -263,18 +278,47 @@ def evaluate_controller_full(
         query_ndcg[eq.query_id] = ndcg
         per_query_traces.append(_extract_query_trace(output))
 
+        if capture_qids and eq.query_id in capture_qids:
+            per_query[eq.query_id] = [
+                {
+                    "rank": i + 1,
+                    "doc_id": d.id,
+                    "rel": int(eq.qrels.get(d.id, 0)),
+                    "initial_rank": int(
+                        d.metadata.get("initial_rank", d.initial_rank) or 0
+                    ),
+                    "reranked": d.reranker_score is not None,
+                }
+                for i, d in enumerate(output.documents[:10])
+            ]
+
+        if cost_model is not None:
+            from ragtune.tuning.cost_model import QueryUsage
+            usage = QueryUsage.from_budget_state(
+                output.final_budget_state, retrieval_ms=elapsed_ms
+            )
+            usd_costs.append(cost_model.cost_usd_per_query(usage))
+            fl = cost_model.flops_per_query(usage)
+            if fl is None:
+                any_api_model = True
+            else:
+                flops_vals.append(fl)
+
     def _mean(xs: List[float]) -> float:
         return sum(xs) / len(xs) if xs else 0.0
 
     return EvalResult(
         objectives=TrialObjectives(
             ndcg_at_10=_mean(ndcg_scores),
+            cost_usd=_mean(usd_costs),
             rerank_docs=_mean(rerank_costs),
             latency_ms=_mean(latencies_ms),
             queries_evaluated=len(ndcg_scores),
+            flops=None if any_api_model or not flops_vals else _mean(flops_vals),
         ),
         trace=_aggregate_traces(per_query_traces),
         query_ndcg=query_ndcg,
+        per_query=per_query,
     )
 
 
@@ -342,6 +386,13 @@ def _compute_param_correlations(
 
 _MODULE_CYCLE = ["reranker", "scheduler", "estimator", "feedback", "retrieval"]
 
+# Sentinel target module for the free-mutation ablation: the LLM keeps GEPA's
+# full context (parent trace diagnostics, instance-wise pool, parameter trends,
+# rationale replay, hints) but may change any knob instead of one module per
+# iteration. Isolates per-module mutation as the single variable against
+# AgentHPO, which has the free action space but none of the context.
+FREE_MODULE = "all"
+
 _MODULE_PARAM_KEYS: Dict[str, List[str]] = {
     "reranker":    ["reranker_type", "ce_model", "monot5_model", "monot5_batch_size"],
     "scheduler":   ["scheduler_type", "scheduler_batch_size", "gd_llm_limit", "gd_ce_limit"],
@@ -351,6 +402,34 @@ _MODULE_PARAM_KEYS: Dict[str, List[str]] = {
         "original_query_depth", "depth_per_reformulation", "max_pool_size",
         "near_duplicate_threshold", "budget_rerank_docs", "budget_reformulations",
         "assembler_max_docs",
+    ],
+}
+_MODULE_PARAM_KEYS[FREE_MODULE] = [k for ks in _MODULE_PARAM_KEYS.values() for k in ks]
+
+# Domain hints shown to the proposer, keyed by module. Under free mutation every
+# module's hints are shown, since any knob may change.
+_DIAGNOSTIC_HINTS: Dict[str, List[str]] = {
+    "reranker": [
+        "- pct_pool_reranked < 30%: budget_rerank_docs too tight; consider raising it",
+        "- noop consistently wins: BM25 pool quality is already high; cross-encoder adds noise on small pools",
+        "- cross-encoder wins at depth>100: neural reranker rescues BM25-misranked relevant docs",
+    ],
+    "scheduler": [
+        "- active-learning: ranks by estimator score; good when estimator is reliable",
+        "- graceful-degradation: falls back gracefully when reranker quality is uncertain",
+    ],
+    "estimator": [
+        "- similarity: adds sentence-encoder cost per candidate but improves batch selection",
+        "- baseline: cheapest; good when pool is already well-ordered by BM25",
+    ],
+    "feedback": [
+        "- budget-stop with low threshold: exits early when budget nearly spent",
+        "- feedback_stop_rate>70%: feedback is cutting runs short before docs are reranked",
+    ],
+    "retrieval": [
+        "- original_query_depth controls how many BM25 docs enter the pool",
+        "- raising depth helps cross-encoder reranking; noop is unaffected by depth >10",
+        "- budget_rerank_docs must be <= max_pool_size to avoid wasted budget",
     ],
 }
 
@@ -363,13 +442,28 @@ class LLMOptimizerConfig(BaseModel):
     # LLM settings
     llm_model: str = "gpt-4o-mini"
     temperature: float = 0.7
-    max_history_in_prompt: int = 20
+    # Full budget by default: showing fewer prior trials than the agenthpo arm
+    # confounded "does GEPA's machinery help" with "GEPA sees less history".
+    max_history_in_prompt: int = 1000
 
     # Iteration budget (includes startup)
     n_iterations: int = 30
     n_startup: int = 3       # random configs to seed the pool before GEPA loop
-    n_minibatch: int = 10    # queries for fast minibatch screening (GEPA stage 1)
+    n_minibatch: int = 25    # queries for fast minibatch screening (GEPA stage 1)
+    # Screen gate as a multiple of the parent's own standard error on the
+    # minibatch, instead of a hardcoded NDCG delta. Per-query NDCG spread is
+    # ~0.24 on these corpora, so SE on a 10-query mean is ~0.077 and the old
+    # fixed 0.02 gate sat ~4x inside the noise: it discarded candidates on coin
+    # flips (one cell lost 15 of 30 trials to screening). Asymmetric by design —
+    # with a 30-trial budget, wrongly discarding a good candidate costs more
+    # than evaluating a bad one, so require real evidence to reject.
+    screen_k_sigma: float = 2.0
+    screen_min_gate: float = 0.02   # floor, for degenerate zero-variance cases
     merge_every: int = 10    # perform a merge crossover every N iterations (0 = disabled)
+    # Ablation: keep GEPA's reflective context but drop the one-module-per-
+    # iteration restriction, so the LLM may change any knob. Isolates per-module
+    # mutation as the single difference from AgentHPO's free action space.
+    free_mutation: bool = False
 
     # Evaluation settings
     n_eval_queries: int = 50
@@ -412,9 +506,14 @@ class LLMAgentOptimizer:
         self,
         config: LLMOptimizerConfig,
         search_space: Optional[RAGtuneSearchSpace] = None,
+        # When given, objective 2 becomes USD/query. Must match whatever the
+        # arms this is compared against use, or the Pareto fronts differ in
+        # units. See specs/spec-cost-model.md.
+        cost_model: Optional[Any] = None,
     ):
         self.config = config
         self.search_space = search_space or RAGtuneSearchSpace(**config.search_space_overrides)
+        self.cost_model = cost_model
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -447,7 +546,7 @@ class LLMAgentOptimizer:
         remaining = self.config.n_iterations - n_startup
         for step in range(remaining):
             iteration += 1
-            target_module = next(module_iter)
+            target_module = FREE_MODULE if self.config.free_mutation else next(module_iter)
 
             # Select parent from pool (Pareto-weighted)
             if len(pool) > 0:
@@ -507,12 +606,16 @@ class LLMAgentOptimizer:
             overrides = self.search_space.to_retrieval_overrides(params)
             result = evaluate_controller_full(
                 controller, eval_dataset, self.config.n_eval_queries, overrides,
+                cost_model=self.cost_model,
             )
             return LLMCandidate(
                 iteration=iteration,
                 params=params,
                 ndcg_at_10=result.objectives.ndcg_at_10,
-                mean_rerank_docs=result.objectives.rerank_docs,
+                mean_rerank_docs=(
+                    result.objectives.cost_usd if self.cost_model is not None
+                    else result.objectives.rerank_docs
+                ),
                 rationale=rationale,
                 trace=result.trace,
                 query_ndcg=result.query_ndcg,
@@ -542,9 +645,16 @@ class LLMAgentOptimizer:
     ) -> LLMCandidate:
         # Parent's score on the minibatch queries (from cached query_ndcg)
         parent_mini = 0.0
+        gate = self.config.screen_min_gate
         if parent is not None and parent.query_ndcg:
             scores = [parent.query_ndcg[qid] for qid in minibatch_qids if qid in parent.query_ndcg]
             parent_mini = sum(scores) / len(scores) if scores else 0.0
+            if len(scores) > 1:
+                mean = parent_mini
+                var = sum((x - mean) ** 2 for x in scores) / (len(scores) - 1)
+                se = (var ** 0.5) / (len(scores) ** 0.5)
+                gate = max(self.config.screen_min_gate,
+                           self.config.screen_k_sigma * se)
 
         # Stage 1: minibatch eval
         try:
@@ -561,8 +671,10 @@ class LLMAgentOptimizer:
                 mutated_module=target_module,
             )
 
-        # Allow a small tolerance so near-ties proceed to full eval
-        if mini_ndcg is None or mini_ndcg < parent_mini - 0.02:
+        # Reject only when the minibatch says the child is worse by more than
+        # the parent's own sampling error on those same queries. Near-ties
+        # proceed to full evaluation rather than being discarded on noise.
+        if mini_ndcg is None or mini_ndcg < parent_mini - gate:
             return LLMCandidate(
                 iteration=iteration, params=params,
                 ndcg_at_10=mini_ndcg or 0.0,
@@ -611,9 +723,17 @@ class LLMAgentOptimizer:
             "Goal: find configurations that Pareto-dominate existing ones on:\n"
             "  - MAXIMIZE ndcg_at_10  (retrieval quality, 0–1)\n"
             "  - MINIMIZE mean_rerank_docs  (computational cost)\n\n"
-            f"## Your task this iteration: improve the [{target_module.upper()}] module only.\n"
-            f"Module parameters to change: {module_keys}\n"
-            "All other parameters must be copied exactly from the parent config.\n\n"
+            + (
+                "## Your task this iteration: improve the configuration. You may "
+                "change ANY parameter.\n"
+                "Use the parent as a starting point, but you are not restricted to "
+                "one module — change several knobs together if the diagnostics "
+                "support it.\n\n"
+                if target_module == FREE_MODULE else
+                f"## Your task this iteration: improve the [{target_module.upper()}] module only.\n"
+                f"Module parameters to change: {module_keys}\n"
+                "All other parameters must be copied exactly from the parent config.\n\n"
+            ) +
             "## Full search space (for reference):\n\n"
             "### Component types:\n"
             f"reranker_type:     {sp.reranker_types}\n"
@@ -673,11 +793,19 @@ class LLMAgentOptimizer:
                 f"Diagnostics: {diag}\n"
                 f"Parameters:\n{json.dumps(parent.params, indent=2)}"
             )
-            sections.append(
-                f"\n## Your task: mutate ONLY the [{target_module.upper()}] parameters.\n"
-                f"Keys to change: {_MODULE_PARAM_KEYS.get(target_module, [])}\n"
-                "Keep all other parameters identical to the parent."
-            )
+            if target_module == FREE_MODULE:
+                sections.append(
+                    "\n## Your task: propose an improved configuration. Any "
+                    "parameter may change.\n"
+                    "Prefer coordinated changes the diagnostics justify over "
+                    "single-knob tweaks."
+                )
+            else:
+                sections.append(
+                    f"\n## Your task: mutate ONLY the [{target_module.upper()}] parameters.\n"
+                    f"Keys to change: {_MODULE_PARAM_KEYS.get(target_module, [])}\n"
+                    "Keep all other parameters identical to the parent."
+                )
         else:
             sections.append("No history yet — this is the first iteration.")
             sections.append("Propose a balanced starting configuration.")
@@ -735,24 +863,17 @@ class LLMAgentOptimizer:
             )
 
         # ── Diagnostic guide (target-module focused) ──────────────────────────
-        sections.append(f"\n## Diagnostic hints for [{target_module.upper()}]:")
-        if target_module == "reranker":
-            sections.append("- pct_pool_reranked < 30%: budget_rerank_docs too tight; consider raising it in the retrieval turn")
-            sections.append("- noop consistently wins: BM25 pool quality is already high; cross-encoder adds noise on small pools")
-            sections.append("- cross-encoder wins at depth>100: neural reranker rescues BM25-misranked relevant docs")
-        elif target_module == "scheduler":
-            sections.append("- active-learning: ranks by estimator score; good when estimator is reliable")
-            sections.append("- graceful-degradation: falls back gracefully when reranker quality is uncertain")
-        elif target_module == "estimator":
-            sections.append("- similarity: adds sentence-encoder cost per candidate but improves batch selection")
-            sections.append("- baseline: cheapest; good when pool is already well-ordered by BM25")
-        elif target_module == "feedback":
-            sections.append("- budget-stop with low threshold: exits early when budget nearly spent")
-            sections.append("- feedback_stop_rate>70%: feedback is cutting runs short before docs are reranked")
-        elif target_module == "retrieval":
-            sections.append("- original_query_depth controls how many BM25 docs enter the pool")
-            sections.append("- raising depth helps cross-encoder reranking; noop is unaffected by depth >10")
-            sections.append("- budget_rerank_docs must be ≤ max_pool_size to avoid wasted budget")
+        _hint_modules = (
+            list(_MODULE_CYCLE) if target_module == FREE_MODULE else [target_module]
+        )
+        sections.append(
+            "\n## Diagnostic hints:" if target_module == FREE_MODULE
+            else f"\n## Diagnostic hints for [{target_module.upper()}]:"
+        )
+        for _mod in _hint_modules:
+            if target_module == FREE_MODULE:
+                sections.append(f"  [{_mod}]")
+            sections.extend(_DIAGNOSTIC_HINTS.get(_mod, []))
 
         sections.append("\nRespond with JSON only (rationale + params).")
         return "\n".join(sections)
@@ -800,36 +921,8 @@ class LLMAgentOptimizer:
     # ── Random sampling for startup ───────────────────────────────────────────
 
     def _sample_random(self, rng: random.Random) -> Dict[str, Any]:
-        sp = self.search_space
-        str_batch = [str(b) for b in sp.monot5_batch_sizes]
-        raw: Dict[str, Any] = {
-            "reranker_type":     rng.choice(sp.reranker_types),
-            "reformulator_type": rng.choice(sp.reformulator_types),
-            "estimator_type":    rng.choice(sp.estimator_types),
-            "scheduler_type":    rng.choice(sp.scheduler_types),
-            "feedback_type":     rng.choice(sp.feedback_types),
-            "original_query_depth":      rng.randint(*sp.original_query_depth_range),
-            "depth_per_reformulation":   rng.randint(*sp.depth_per_reformulation_range),
-            "max_pool_size":             rng.randint(*sp.max_pool_size_range),
-            "near_duplicate_threshold":  rng.uniform(*sp.near_duplicate_threshold_range),
-            "scheduler_batch_size":      rng.randint(*sp.scheduler_batch_size_range),
-            "assembler_max_docs":        rng.randint(*sp.assembler_max_docs_range),
-            "budget_rerank_docs":        rng.randint(*sp.budget_rerank_docs_range),
-            "budget_reformulations":     rng.randint(*sp.budget_reformulations_range),
-            "ce_model":                  rng.choice(sp.ce_models),
-            "monot5_model":              rng.choice(sp.monot5_models),
-            "monot5_batch_size":         rng.choice(str_batch),
-            "reformulator_model":        rng.choice(sp.reformulator_models),
-            "reformulator_n_variants":   rng.randint(*sp.reformulator_n_variants_range),
-            "similarity_model":          rng.choice(sp.similarity_models),
-            "min_reranked_for_regression": rng.randint(*sp.min_reranked_for_regression_range),
-            "gd_llm_limit":              rng.randint(*sp.gd_llm_limit_range),
-            "gd_ce_limit":               rng.randint(*sp.gd_ce_limit_range),
-            "budget_stop_token_threshold": rng.uniform(*sp.budget_stop_token_threshold_range),
-        }
-        return self._validate_and_fix_params(raw)
+        return sample_random_params(self.search_space, rng)
 
-    # ── Parsing ───────────────────────────────────────────────────────────────
 
     def _parse_response(
         self, raw: str, parent: Optional[LLMCandidate]
@@ -856,79 +949,127 @@ class LLMAgentOptimizer:
         return self._validate_and_fix_params(base), rationale
 
     def _validate_and_fix_params(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        sp = self.search_space
+        return validate_and_fix_params(self.search_space, p)
 
-        def clamp_int(key: str, lo: int, hi: int, default: int) -> int:
-            try:
-                return max(lo, min(hi, int(p.get(key, default))))
-            except (TypeError, ValueError):
-                return default
-
-        def clamp_float(key: str, lo: float, hi: float, default: float) -> float:
-            try:
-                return max(lo, min(hi, float(p.get(key, default))))
-            except (TypeError, ValueError):
-                return default
-
-        def pick(key: str, choices: List[Any], default: Any) -> Any:
-            val = p.get(key, default)
-            return val if val in choices else default
-
-        str_batch_sizes = [str(b) for b in sp.monot5_batch_sizes]
-
-        def fix_batch_size(val: Any) -> str:
-            sval = str(val) if not isinstance(val, str) else val
-            if sval in str_batch_sizes:
-                return sval
-            try:
-                target = int(float(str(val)))
-                nearest = min(sp.monot5_batch_sizes, key=lambda x: abs(x - target))
-                return str(nearest)
-            except (TypeError, ValueError):
-                return str_batch_sizes[2]
-
-        out: Dict[str, Any] = {}
-        out["reranker_type"] = pick("reranker_type", sp.reranker_types, sp.reranker_types[0])
-        out["reformulator_type"] = pick("reformulator_type", sp.reformulator_types, sp.reformulator_types[0])
-        out["estimator_type"] = pick("estimator_type", sp.estimator_types, sp.estimator_types[0])
-        out["scheduler_type"] = pick("scheduler_type", sp.scheduler_types, sp.scheduler_types[0])
-        out["feedback_type"] = pick("feedback_type", sp.feedback_types, sp.feedback_types[0])
-        out["ce_model"] = pick("ce_model", sp.ce_models, sp.ce_models[0])
-        out["monot5_model"] = pick("monot5_model", sp.monot5_models, sp.monot5_models[0])
-        out["monot5_batch_size"] = fix_batch_size(p.get("monot5_batch_size", str_batch_sizes[2]))
-        out["reformulator_model"] = pick("reformulator_model", sp.reformulator_models, sp.reformulator_models[0])
-        out["reformulator_n_variants"] = clamp_int("reformulator_n_variants", *sp.reformulator_n_variants_range, 3)
-        out["similarity_model"] = pick("similarity_model", sp.similarity_models, sp.similarity_models[0])
-        out["min_reranked_for_regression"] = clamp_int("min_reranked_for_regression", *sp.min_reranked_for_regression_range, 3)
-        out["gd_llm_limit"] = clamp_int("gd_llm_limit", *sp.gd_llm_limit_range, 3)
-        out["gd_ce_limit"] = clamp_int("gd_ce_limit", *sp.gd_ce_limit_range, 10)
-        out["budget_stop_token_threshold"] = clamp_float(
-            "budget_stop_token_threshold", *sp.budget_stop_token_threshold_range, 0.9
-        )
-        out["original_query_depth"] = clamp_int("original_query_depth", *sp.original_query_depth_range, 10)
-        out["depth_per_reformulation"] = clamp_int("depth_per_reformulation", *sp.depth_per_reformulation_range, 5)
-        out["max_pool_size"] = clamp_int("max_pool_size", *sp.max_pool_size_range, 50)
-        out["near_duplicate_threshold"] = clamp_float(
-            "near_duplicate_threshold", *sp.near_duplicate_threshold_range, 0.8
-        )
-        out["scheduler_batch_size"] = clamp_int("scheduler_batch_size", *sp.scheduler_batch_size_range, 5)
-        out["assembler_max_docs"] = clamp_int("assembler_max_docs", *sp.assembler_max_docs_range, 10)
-        out["budget_rerank_docs"] = clamp_int("budget_rerank_docs", *sp.budget_rerank_docs_range, 50)
-        out["budget_reformulations"] = clamp_int("budget_reformulations", *sp.budget_reformulations_range, 1)
-        return out
-
-    # ── Output ────────────────────────────────────────────────────────────────
 
     def _write_pareto_configs(self, pareto_front: List[LLMCandidate]) -> None:
-        out_dir = Path(self.config.output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for c in pareto_front:
-            pipeline_dict = self.search_space.to_pipeline_dict(c.params)
-            fname = (
-                f"pareto_iter_{c.iteration}"
-                f"_ndcg{c.ndcg_at_10:.3f}"
-                f"_cost{c.mean_rerank_docs:.0f}"
-                ".yaml"
-            )
-            with open(out_dir / fname, "w") as f:
-                yaml.dump({"pipeline": pipeline_dict}, f, sort_keys=False)
+        write_pareto_configs(self.search_space, self.config.output_dir, pareto_front)
+
+
+# ── Shared proposal helpers ───────────────────────────────────────────────────
+# Module-level so other LLM-driven optimizers (e.g. AgentHPO) can reuse the
+# clamping, random sampling and Pareto serialisation without inheriting GEPA's
+# population machinery. The methods below delegate here.
+
+def validate_and_fix_params(search_space: Any, p: Dict[str, Any]) -> Dict[str, Any]:
+    sp = search_space
+
+    def clamp_int(key: str, lo: int, hi: int, default: int) -> int:
+        try:
+            return max(lo, min(hi, int(p.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+
+    def clamp_float(key: str, lo: float, hi: float, default: float) -> float:
+        try:
+            return max(lo, min(hi, float(p.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+
+    def pick(key: str, choices: List[Any], default: Any) -> Any:
+        val = p.get(key, default)
+        return val if val in choices else default
+
+    str_batch_sizes = [str(b) for b in sp.monot5_batch_sizes]
+
+    def fix_batch_size(val: Any) -> str:
+        sval = str(val) if not isinstance(val, str) else val
+        if sval in str_batch_sizes:
+            return sval
+        try:
+            target = int(float(str(val)))
+            nearest = min(sp.monot5_batch_sizes, key=lambda x: abs(x - target))
+            return str(nearest)
+        except (TypeError, ValueError):
+            return str_batch_sizes[2]
+
+    out: Dict[str, Any] = {}
+    out["reranker_type"] = pick("reranker_type", sp.reranker_types, sp.reranker_types[0])
+    out["reformulator_type"] = pick("reformulator_type", sp.reformulator_types, sp.reformulator_types[0])
+    out["estimator_type"] = pick("estimator_type", sp.estimator_types, sp.estimator_types[0])
+    out["scheduler_type"] = pick("scheduler_type", sp.scheduler_types, sp.scheduler_types[0])
+    out["feedback_type"] = pick("feedback_type", sp.feedback_types, sp.feedback_types[0])
+    out["ce_model"] = pick("ce_model", sp.ce_models, sp.ce_models[0])
+    out["monot5_model"] = pick("monot5_model", sp.monot5_models, sp.monot5_models[0])
+    out["monot5_batch_size"] = fix_batch_size(p.get("monot5_batch_size", str_batch_sizes[2]))
+    out["reformulator_model"] = pick("reformulator_model", sp.reformulator_models, sp.reformulator_models[0])
+    out["reformulator_n_variants"] = clamp_int("reformulator_n_variants", *sp.reformulator_n_variants_range, 3)
+    out["similarity_model"] = pick("similarity_model", sp.similarity_models, sp.similarity_models[0])
+    out["min_reranked_for_regression"] = clamp_int("min_reranked_for_regression", *sp.min_reranked_for_regression_range, 3)
+    out["gd_llm_limit"] = clamp_int("gd_llm_limit", *sp.gd_llm_limit_range, 3)
+    out["gd_ce_limit"] = clamp_int("gd_ce_limit", *sp.gd_ce_limit_range, 10)
+    out["budget_stop_token_threshold"] = clamp_float(
+        "budget_stop_token_threshold", *sp.budget_stop_token_threshold_range, 0.9
+    )
+    out["original_query_depth"] = clamp_int("original_query_depth", *sp.original_query_depth_range, 10)
+    out["depth_per_reformulation"] = clamp_int("depth_per_reformulation", *sp.depth_per_reformulation_range, 5)
+    out["max_pool_size"] = clamp_int("max_pool_size", *sp.max_pool_size_range, 50)
+    out["near_duplicate_threshold"] = clamp_float(
+        "near_duplicate_threshold", *sp.near_duplicate_threshold_range, 0.8
+    )
+    out["scheduler_batch_size"] = clamp_int("scheduler_batch_size", *sp.scheduler_batch_size_range, 5)
+    out["assembler_max_docs"] = clamp_int("assembler_max_docs", *sp.assembler_max_docs_range, 10)
+    out["budget_rerank_docs"] = clamp_int("budget_rerank_docs", *sp.budget_rerank_docs_range, 50)
+    out["budget_reformulations"] = clamp_int("budget_reformulations", *sp.budget_reformulations_range, 1)
+    return out
+
+# ── Output ────────────────────────────────────────────────────────────────
+
+
+def sample_random_params(search_space: Any, rng: random.Random) -> Dict[str, Any]:
+    sp = search_space
+    str_batch = [str(b) for b in sp.monot5_batch_sizes]
+    raw: Dict[str, Any] = {
+        "reranker_type":     rng.choice(sp.reranker_types),
+        "reformulator_type": rng.choice(sp.reformulator_types),
+        "estimator_type":    rng.choice(sp.estimator_types),
+        "scheduler_type":    rng.choice(sp.scheduler_types),
+        "feedback_type":     rng.choice(sp.feedback_types),
+        "original_query_depth":      rng.randint(*sp.original_query_depth_range),
+        "depth_per_reformulation":   rng.randint(*sp.depth_per_reformulation_range),
+        "max_pool_size":             rng.randint(*sp.max_pool_size_range),
+        "near_duplicate_threshold":  rng.uniform(*sp.near_duplicate_threshold_range),
+        "scheduler_batch_size":      rng.randint(*sp.scheduler_batch_size_range),
+        "assembler_max_docs":        rng.randint(*sp.assembler_max_docs_range),
+        "budget_rerank_docs":        rng.randint(*sp.budget_rerank_docs_range),
+        "budget_reformulations":     rng.randint(*sp.budget_reformulations_range),
+        "ce_model":                  rng.choice(sp.ce_models),
+        "monot5_model":              rng.choice(sp.monot5_models),
+        "monot5_batch_size":         rng.choice(str_batch),
+        "reformulator_model":        rng.choice(sp.reformulator_models),
+        "reformulator_n_variants":   rng.randint(*sp.reformulator_n_variants_range),
+        "similarity_model":          rng.choice(sp.similarity_models),
+        "min_reranked_for_regression": rng.randint(*sp.min_reranked_for_regression_range),
+        "gd_llm_limit":              rng.randint(*sp.gd_llm_limit_range),
+        "gd_ce_limit":               rng.randint(*sp.gd_ce_limit_range),
+        "budget_stop_token_threshold": rng.uniform(*sp.budget_stop_token_threshold_range),
+    }
+    return validate_and_fix_params(search_space, raw)
+
+# ── Parsing ───────────────────────────────────────────────────────────────
+
+
+def write_pareto_configs(search_space: Any, output_dir: str,
+                         pareto_front: List[LLMCandidate]) -> None:
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for c in pareto_front:
+        pipeline_dict = search_space.to_pipeline_dict(c.params)
+        fname = (
+            f"pareto_iter_{c.iteration}"
+            f"_ndcg{c.ndcg_at_10:.3f}"
+            f"_cost{c.mean_rerank_docs:.0f}"
+            ".yaml"
+        )
+        with open(out_dir / fname, "w") as f:
+            yaml.dump({"pipeline": pipeline_dict}, f, sort_keys=False)
