@@ -3,6 +3,7 @@ from ragtune.core.pool import PoolItem
 from ragtune.core.types import RAGtuneContext
 from ragtune.core.interfaces import BaseReranker
 from ragtune.registry import registry
+from ragtune.utils.llm_usage import record_llm_usage
 from ragtune.utils.config import config
 
 @registry.reranker("noop")
@@ -16,6 +17,7 @@ class CrossEncoderReranker(BaseReranker):
     """Local reranking using SentenceTransformers CrossEncoder models."""
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
         from sentence_transformers import CrossEncoder
+        self.model_name = model_name
         self.model = CrossEncoder(model_name)
 
     def rerank(self, documents: List[PoolItem], context: RAGtuneContext, strategy: Optional[str] = None) -> Dict[str, float]:
@@ -23,8 +25,11 @@ class CrossEncoderReranker(BaseReranker):
             return {}
             
         pairs = [[context.query, doc.content] for doc in documents]
+        # Record before predicting: len(pairs) is the batch handed to predict(),
+        # which sets the effective GPU batch and hence per-document cost.
+        context.tracker.record_rerank_call(self.model_name, len(pairs))
         scores = self.model.predict(pairs)
-        
+
         return {doc.doc_id: float(score) for doc, score in zip(documents, scores)}
 
 @registry.reranker("llm")
@@ -56,7 +61,8 @@ class LLMReranker(BaseReranker):
                 ],
                 response_format={"type": "json_object"}
             )
-            
+            record_llm_usage(context, self.model, response)
+
             try:
                 import json
                 result = json.loads(response.choices[0].message.content)

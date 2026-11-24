@@ -2,6 +2,7 @@ from typing import List, Optional
 from ragtune.core.interfaces import BaseReformulator
 from ragtune.core.types import RAGtuneContext
 from ragtune.registry import registry
+from ragtune.utils.llm_usage import record_llm_usage
 from ragtune.utils.config import config
 
 @registry.reformulator("identity")
@@ -48,6 +49,7 @@ class LLMReformulator(BaseReformulator):
                 max_tokens=max_tokens
             )
             
+            record_llm_usage(context, self.model, response)
             content = response.choices[0].message.content
             queries = self._parse_response(content)
             return self._filter_queries(queries, context.query, m)
@@ -199,6 +201,7 @@ class ReformIRReformulator(LLMReformulator):
                 response_format={"type": "json_object"},
                 max_tokens=max_tokens,
             )
+            record_llm_usage(context, self.model, response)
             content = response.choices[0].message.content
             return self._parse_response(content)
         except Exception as e:

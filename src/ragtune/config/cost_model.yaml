@@ -1,0 +1,60 @@
+# Calibrated constants for the FLOPs-and-dollar cost model.
+# See specs/spec-cost-model.md. These are ASSUMPTIONS THAT MOVE CONCLUSIONS —
+# regenerate with scripts/calibrate_cost_model.py and record provenance here.
+
+# Effective context length in tokens, per dataset: n_q + l_doc, after the
+# tokenizer's max_length truncation. Cancels in within-corpus comparisons but
+# scales absolute RPP/QPP, so it is calibrated per dataset.
+n_ctx:
+  nfcorpus: 355    # n_q mean 5.0 + l_doc mean 356.8, 512 cap, 8.0% clipped
+  scifact: 343     # n_q mean 20.8 + l_doc mean 330.0, 512 cap, 10.5% clipped
+  default: 355
+
+# Measured milliseconds per reranked document, as a {batch_size: ms} grid.
+# Device-specific AND batch-size-specific: the effective GPU batch equals the
+# tuned scheduler_batch_size (rerankers.py passes the scheduler's doc list
+# straight to predict()), and per-doc cost swings ~3-4x across the 1-20 range.
+# Interpolated piecewise-linearly, clamped outside the grid.
+#
+# PROVENANCE: artemis / NVIDIA RTX 6000 Ada Generation, nfcorpus, fixed 200-doc
+# workload, median of 3, warmup 64, sentence-transformers length-sorted batching.
+# This is the node Slurm GPU jobs land on. The zeus A6000 is ~1.7x slower
+# (L-6 @ bs=20: 1.184 ms/doc) — recalibrate when changing device, or absolute
+# USD figures are wrong by that factor. Arm-vs-arm comparisons are unaffected,
+# since every arm pays the same rates.
+ce_ms_per_doc:
+  cross-encoder/ms-marco-MiniLM-L-2-v2:
+    1: 1.845
+    2: 1.621
+    5: 0.972
+    10: 0.649
+    20: 0.573
+  cross-encoder/ms-marco-MiniLM-L-6-v2:
+    1: 2.720
+    2: 2.164
+    5: 1.176
+    10: 0.767
+    20: 0.709
+  cross-encoder/ms-marco-MiniLM-L-12-v2:
+    1: 4.026
+    2: 3.019
+    5: 1.524
+    10: 1.328
+    20: 1.372
+
+# Cloud A6000/Ada-class on-demand. Observed range $0.50-1.50/hr; conclusions
+# move with it.
+gpu_usd_per_hour: 0.80
+
+# Retrieval treated as free by default: the GPU is the scarce resource.
+# Set >0 for a CPU-bound deployment (see spec section 7).
+cpu_usd_per_hour: 0.0
+
+# USD per million tokens, [input, output]. Provider published rates.
+token_prices:
+  claude-haiku-4-5: [1.0, 5.0]
+  claude-sonnet-5: [3.0, 15.0]
+  claude-sonnet-4-6: [3.0, 15.0]
+  claude-opus-5: [5.0, 25.0]
+  claude-opus-4-8: [5.0, 25.0]
+  claude-fable-5: [10.0, 50.0]

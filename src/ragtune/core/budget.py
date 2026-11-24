@@ -1,5 +1,5 @@
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from ragtune.core.types import ControllerTrace, CostObject, RemainingBudgetView
 from ragtune.utils.config import config
 from pydantic import BaseModel, Field, model_validator
@@ -52,6 +52,11 @@ class CostTracker:
         self.budget = budget
         self.trace = trace
         self.consumed: Dict[str, float] = {}
+        # Cost-model accounting (see specs/spec-cost-model.md). Kept separate
+        # from `consumed` because these are priced, not budgeted — nothing
+        # enforces a limit on them.
+        self.llm_usage: Dict[str, List[int]] = {}       # model -> [tok_in, tok_out]
+        self.rerank_calls: List[Tuple[str, int]] = []   # (model, n_docs) per call
         self._start_time = time.time()
 
     @property
@@ -126,7 +131,37 @@ class CostTracker:
     def try_consume_tokens(self, n_tokens: int) -> bool:
         return self.try_consume("tokens", n_tokens)
 
+    # ── Cost-model accounting ─────────────────────────────────────────────────
+
+    def record_llm_usage(self, model: str, tokens_in: int, tokens_out: int) -> None:
+        """
+        Record tokens billed by an API model, for the dollar term of the cost
+        model. Not budget-enforced: `tokens` in `consumed` is the assembly
+        context budget, a different quantity.
+        """
+        bucket = self.llm_usage.setdefault(model, [0, 0])
+        bucket[0] += int(tokens_in)
+        bucket[1] += int(tokens_out)
+        self.trace.add(
+            "cost", "llm_usage", model=model,
+            tokens_in=int(tokens_in), tokens_out=int(tokens_out),
+        )
+
+    def record_rerank_call(self, model: str, n_docs: int) -> None:
+        """
+        Record one reranker invocation. `n_docs` is the batch the scheduler
+        handed over, which sets the effective GPU batch and therefore the
+        per-document cost (a ~3.9x factor over the tuned 1-20 range), so calls
+        are recorded individually rather than summed.
+        """
+        if n_docs <= 0:
+            return
+        self.rerank_calls.append((model, int(n_docs)))
+        self.trace.add("cost", "rerank_call", model=model, n_docs=int(n_docs))
+
     def snapshot(self) -> dict:
         data = self.consumed.copy()
         data["latency"] = self.elapsed_ms
+        data["llm_usage"] = {m: tuple(v) for m, v in self.llm_usage.items()}
+        data["rerank_calls"] = list(self.rerank_calls)
         return data

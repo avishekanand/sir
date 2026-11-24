@@ -69,10 +69,19 @@ def run_study(
         ),
     ]
 
+    # Cost model: when configured, objective 2 becomes USD per query, which
+    # prices reranker size, scheduler batch size, and LLM calls that
+    # mean_rerank_docs cannot see. See specs/spec-cost-model.md.
+    cost_model = None
+    if getattr(config, "use_cost_model", False):
+        from ragtune.tuning.cost_model import load_cost_model
+        cost_model = load_cost_model(dataset=getattr(config, "dataset_name", None))
+
     evaluator = TrialEvaluator(
         dataset=eval_dataset,
         n_eval_queries=config.n_eval_queries,
         pruners=pruners,
+        cost_model=cost_model,
     )
 
     def objective(trial: Any) -> tuple:
@@ -91,8 +100,12 @@ def run_study(
 
         trial.set_user_attr("latency_ms", objectives.latency_ms)
         trial.set_user_attr("queries_evaluated", objectives.queries_evaluated)
+        trial.set_user_attr("rerank_docs", objectives.rerank_docs)
+        trial.set_user_attr("cost_usd", objectives.cost_usd)
+        trial.set_user_attr("flops", objectives.flops)
 
-        return objectives.ndcg_at_10, objectives.rerank_docs
+        cost = objectives.cost_usd if cost_model is not None else objectives.rerank_docs
+        return objectives.ndcg_at_10, cost
 
     study.optimize(
         objective,

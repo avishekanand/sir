@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 
+from ragtune.tuning.cost_model import CostModel, QueryUsage
 from ragtune.tuning.pruners import TuningPruner
 
 
@@ -109,9 +110,14 @@ class EvalDataset:
 @dataclass
 class TrialObjectives:
     ndcg_at_10: float        # objective 1 — maximize
-    rerank_docs: float       # objective 2 — minimize (mean per query)
+    cost_usd: float          # objective 2 — minimize (mean USD per query)
+    rerank_docs: float       # retained: reported, and the legacy objective 2
     latency_ms: float        # logged as user attribute
     queries_evaluated: int
+    # Local forward-pass FLOPs per query. None when an API model participated,
+    # because a closed model's FLOPs are not computable and a partial sum must
+    # never be presented as total compute. See specs/spec-cost-model.md.
+    flops: Optional[float] = None
 
 
 def ndcg_at_k(ranked_ids: List[str], qrels: Dict[str, int], k: int = 10) -> float:
@@ -154,11 +160,15 @@ class TrialEvaluator:
         n_eval_queries: int = 200,
         pruners: Optional[List[TuningPruner]] = None,
         report_interval: int = 1,
+        cost_model: Optional["CostModel"] = None,
     ):
         self.dataset = dataset
         self.n_eval_queries = n_eval_queries
         self.pruners: List[TuningPruner] = pruners or []
         self.report_interval = report_interval
+        # None disables dollar/FLOPs accounting; cost_usd then reports 0.0 and
+        # callers must keep using rerank_docs as objective 2.
+        self.cost_model = cost_model
 
     def evaluate(
         self,
@@ -192,6 +202,9 @@ class TrialEvaluator:
         ndcg_scores: List[float] = []
         rerank_costs: List[float] = []
         latencies_ms: List[float] = []
+        usd_costs: List[float] = []
+        flops_vals: List[float] = []
+        any_api_model = False
         n_total = min(self.n_eval_queries, len(self.dataset.queries))
 
         for step, eq in enumerate(self.dataset.iter_queries(limit=n_total), start=1):
@@ -203,6 +216,7 @@ class TrialEvaluator:
                 ndcg_scores.append(0.0)
                 rerank_costs.append(0.0)
                 latencies_ms.append(0.0)
+                usd_costs.append(0.0)
                 trial.set_user_attr(f"error_step_{step}", str(exc))  # type: ignore
                 continue
 
@@ -214,6 +228,17 @@ class TrialEvaluator:
             ndcg_scores.append(ndcg)
             rerank_costs.append(cost)
             latencies_ms.append(elapsed_ms)
+
+            if self.cost_model is not None:
+                usage = QueryUsage.from_budget_state(
+                    output.final_budget_state, retrieval_ms=elapsed_ms
+                )
+                usd_costs.append(self.cost_model.cost_usd_per_query(usage))
+                fl = self.cost_model.flops_per_query(usage)
+                if fl is None:
+                    any_api_model = True
+                else:
+                    flops_vals.append(fl)
 
             if step % self.report_interval == 0:
                 prune_kwargs = dict(
@@ -232,7 +257,9 @@ class TrialEvaluator:
 
         return TrialObjectives(
             ndcg_at_10=float(np.mean(ndcg_scores)) if ndcg_scores else 0.0,
+            cost_usd=float(np.mean(usd_costs)) if usd_costs else 0.0,
             rerank_docs=float(np.mean(rerank_costs)) if rerank_costs else 0.0,
             latency_ms=float(np.mean(latencies_ms)) if latencies_ms else 0.0,
             queries_evaluated=len(ndcg_scores),
+            flops=None if any_api_model or not flops_vals else float(np.mean(flops_vals)),
         )

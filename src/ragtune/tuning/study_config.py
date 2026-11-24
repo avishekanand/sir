@@ -30,6 +30,14 @@ class TuningStudyConfig(BaseModel):
     max_trial_seconds: float = 120.0     # RuntimePruner: abort if projected wall time > this
     pareto_warmup_trials: int = 30       # ParetoPruner: don't prune before this many completed trials
 
+    # Cost model (specs/spec-cost-model.md). When True, objective 2 becomes USD
+    # per query instead of mean reranked documents, which prices reranker size,
+    # scheduler batch size, and LLM calls. Off by default so existing studies
+    # keep their objective and stay comparable.
+    use_cost_model: bool = False
+    # Selects the per-dataset n_ctx calibration; falls back to `default`.
+    dataset_name: Optional[str] = None
+
     # Output
     output_dir: str = "tuning_results"
 
