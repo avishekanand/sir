@@ -37,13 +37,14 @@ class PromptContext:
     tokenizer: str
     corpus_description: str = "(no corpus description provided)"
     min_tool_turns: int = 3
+    packages: str = "none"
 
     def fill(self, template: str) -> str:
         pct = f"+{100.0 / self.n_val:.2f}%" if self.n_val else "n/a"
         return prompts.render(
             template, n_val=self.n_val, n_eval=self.n_eval or "unknown", one_query_pct=pct,
             tokenizer=self.tokenizer, corpus_description=self.corpus_description,
-            min_tool_turns=self.min_tool_turns,
+            min_tool_turns=self.min_tool_turns, packages=self.packages,
         )
 
 

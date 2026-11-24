@@ -61,8 +61,10 @@ Wrap your final analysis in <summary>...</summary> with:
 
 CODE_SYSTEM = """\
 You are an expert Python developer specializing in BM25 document preprocessing. Programs may use the
-standard library (re, string, collections, itertools, unicodedata, math, …) and any NLP packages already
-installed. They may NOT use the filesystem, network, subprocesses, os/sys/pathlib, open(), eval() or exec().
+standard library (re, string, collections, itertools, unicodedata, math, …) and ONLY these third-party
+packages: {packages}. Nothing else is installed, and programs cannot download data or models (no
+nltk.download(), no spaCy models beyond those listed). They may NOT use the filesystem, network,
+subprocesses, os/sys/pathlib, open(), eval() or exec().
 
 """ + _SHARED_OBJECTIVE + """
 ## Program interface

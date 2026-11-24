@@ -124,3 +124,10 @@ def test_code_agent_rejects_zero_workers():
 
     with pytest.raises(ValueError):
         CodeAgent(make_code_llm({}), CTX, max_workers=0)
+
+
+def test_code_system_prompt_lists_only_available_packages():
+    ctx = PromptContext(n_val=10, n_eval=20, tokenizer="t", packages="numpy")
+    system = CodeAgent(make_code_llm({}), ctx).system
+    assert "ONLY these third-party\npackages: numpy." in system
+    assert "nltk.download()" in system

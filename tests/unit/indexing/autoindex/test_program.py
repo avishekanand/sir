@@ -124,3 +124,13 @@ def test_corpus_to_documents_keeps_title_in_metadata():
     docs = corpus_to_documents({"1": {"text": "t", "title": "T"}, "2": {"text": "u", "title": ""}})
     assert docs[0].metadata == {"title": "T"}
     assert docs[1].metadata == {}
+
+
+def test_available_packages_reports_only_importable(monkeypatch):
+    import importlib.util
+
+    from ragtune.indexing.autoindex import program as prog
+
+    present = {"numpy", "spacy", "en_core_web_sm"}
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name in present else None)
+    assert prog.available_packages() == ["spacy", "numpy", "spacy model 'en_core_web_sm'"]

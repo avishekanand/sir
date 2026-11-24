@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import concurrent.futures
 import hashlib
+import importlib.util
 import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -160,6 +161,25 @@ def load_program(code: str) -> RepresentationProgram:
 # ---------------------------------------------------------------------------
 # Running (doc-id hashing, timeout, contract)
 # ---------------------------------------------------------------------------
+
+# Third-party packages a program might reasonably want. Only the importable ones are advertised.
+_OPTIONAL_PACKAGES = ("nltk", "spacy", "numpy", "regex", "unidecode", "inflect", "rapidfuzz", "Stemmer", "sklearn")
+_SPACY_MODELS = ("en_core_web_sm", "en_core_web_md", "en_core_web_lg")
+
+
+def available_packages() -> List[str]:
+    """Optional third-party packages (and spaCy models) importable in this environment."""
+    def has(name: str) -> bool:
+        try:
+            return importlib.util.find_spec(name) is not None
+        except (ImportError, ValueError):
+            return False
+
+    found = [p for p in _OPTIONAL_PACKAGES if has(p)]
+    if "spacy" in found:
+        found += [f"spacy model '{m}'" for m in _SPACY_MODELS if has(m)]
+    return found
+
 
 def corpus_to_documents(corpus: Dict[str, Dict]) -> List[Document]:
     """Convert a RAGtune/BEIR corpus dict into Documents (title kept in metadata)."""

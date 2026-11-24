@@ -29,6 +29,7 @@ from ragtune.indexing.autoindex.metrics import EvalSummary, diff_outcomes, evalu
 from ragtune.indexing.autoindex.program import (
     IDENTITY_PROGRAM_CODE,
     Document,
+    available_packages,
     ProgramError,
     corpus_to_documents,
     load_program,
@@ -174,7 +175,8 @@ class AutoIndex:
 
         ctx = PromptContext(n_val=len(val_queries), n_eval=n_eval_queries, tokenizer=self.tokenizer.describe(),
                             corpus_description=cfg.corpus_description or "(no corpus description provided)",
-                            min_tool_turns=cfg.min_tool_turns)
+                            min_tool_turns=cfg.min_tool_turns,
+                            packages=", ".join(available_packages()) or "none")
         analysis_agent = (AnalysisAgent(self.analysis_llm, ctx, max_turns=cfg.analysis_max_turns,
                                         min_tool_turns=cfg.min_tool_turns) if cfg.use_analysis else None)
         code_agent = CodeAgent(self.code_llm, ctx, max_workers=cfg.code_concurrency or cfg.n_candidates)
