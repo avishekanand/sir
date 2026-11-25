@@ -36,6 +36,9 @@ benchmarks = [
     "datasets>=2.0.0",
     "huggingface_hub>=0.20.0",
 ]
+autoindex = [
+    "bm25s>=0.2",
+]
 
 [project.scripts]
 ragtune = "ragtune.cli.main:main"
