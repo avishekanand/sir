@@ -476,6 +476,11 @@ def index(
         raise typer.Exit(code=1)
 
 
+# `ragtune budget` defaults, applied only when neither a flag nor --config sets the key.
+# latency_slo_ms keeps the CLI's historical 300 ms (BudgetConfig's own default is 500).
+BUDGET_CLI_DEFAULTS = {"gpu_count": 1, "offered_rps": 10.0, "latency_slo_ms": 300}
+
+
 @app.command()
 def budget(
     budget_type: str = typer.Option(
@@ -496,18 +501,20 @@ def budget(
     gpu_type: Optional[str] = typer.Option(
         None, "--gpu", help="GPU type (e.g. H100-NVL-96GB, A100-80GB)"
     ),
-    gpu_count: int = typer.Option(1, "--gpu-count", help="Number of GPUs"),
+    gpu_count: Optional[int] = typer.Option(
+        None, "--gpu-count", help="Number of GPUs (default 1)"
+    ),
     gpu_hourly_rate: Optional[float] = typer.Option(
         None, "--gpu-rate", help="GPU hourly rate override ($)"
     ),
     model_name: Optional[str] = typer.Option(
         None, "--model", help="Model name (e.g. llama-3.1-8b)"
     ),
-    offered_rps: float = typer.Option(
-        10.0, "--rps", help="Offered request rate (requests/sec)"
+    offered_rps: Optional[float] = typer.Option(
+        None, "--rps", help="Offered request rate (requests/sec, default 10)"
     ),
-    latency_slo_ms: int = typer.Option(
-        300, "--slo", help="Latency SLO in milliseconds"
+    latency_slo_ms: Optional[int] = typer.Option(
+        None, "--slo", help="Latency SLO in milliseconds (default 300)"
     ),
     region: Optional[str] = typer.Option(
         None, "--region", help="Cloud region for carbon intensity"
@@ -561,13 +568,16 @@ def budget(
     config_dict = {}
     if gpu_type:
         config_dict["gpu_type"] = gpu_type
-    config_dict["gpu_count"] = gpu_count
+    if gpu_count is not None:
+        config_dict["gpu_count"] = gpu_count
     if gpu_hourly_rate is not None:
         config_dict["gpu_hourly_rate"] = gpu_hourly_rate
     if model_name:
         config_dict["model_name"] = model_name
-    config_dict["offered_rps"] = offered_rps
-    config_dict["latency_slo_ms"] = latency_slo_ms
+    if offered_rps is not None:
+        config_dict["offered_rps"] = offered_rps
+    if latency_slo_ms is not None:
+        config_dict["latency_slo_ms"] = latency_slo_ms
     if region:
         config_dict["region"] = region
     if pue is not None:
@@ -585,15 +595,24 @@ def budget(
         config_dict["extra"] = extra
 
     # Load from YAML if provided (CLI options override YAML values)
-    if config_path and config_path.exists():
+    if config_path:
+        if not config_path.exists():
+            console.print(f"[bold red]Error:[/bold red] Config file {config_path} not found.")
+            raise typer.Exit(code=1)
         import yaml as _yaml
 
         with open(config_path) as f:
             yaml_cfg = _yaml.safe_load(f) or {}
-        # YAML values are defaults; CLI options take precedence
+        # YAML values are defaults; CLI options take precedence (key by key inside "extra")
+        if "extra" in config_dict:
+            config_dict["extra"] = {**yaml_cfg.get("extra", {}), **config_dict["extra"]}
         for k, v in yaml_cfg.items():
             if k not in config_dict:
                 config_dict[k] = v
+
+    # Defaults when neither a flag nor the YAML sets them
+    for k, v in BUDGET_CLI_DEFAULTS.items():
+        config_dict.setdefault(k, v)
 
     try:
         # Build context for embedding/reranking loaders
@@ -612,9 +631,7 @@ def budget(
         result = calculate_budget(
             budget_type=budget_type,
             config=config_dict if config_dict else None,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cached_tokens=cached_tokens,
+            **context,
         )
         console.print(format_report(result, budget_type))
 
